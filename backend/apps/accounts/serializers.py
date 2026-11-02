@@ -16,3 +16,23 @@ class VerifiedTokenObtainPairSerializer(TokenObtainPairSerializer):
   data=super().validate(attrs)
   if not self.user.is_active or self.user.verification_status!="VERIFIED": raise AuthenticationFailed("Account is awaiting verification or inactive.")
   return data
+
+class ManagedUserCreateSerializer(serializers.ModelSerializer):
+    password=serializers.CharField(write_only=True,min_length=10)
+    role=serializers.ChoiceField(choices=[("USER","USER"),("ADMIN","ADMIN")],default="USER")
+    class Meta:
+        model=User
+        fields=["name","email","password","department","designation","role"]
+    def create(self,data):
+        role_name=data.pop("role")
+        password=data.pop("password")
+        user=User.objects.create_user(password=password,is_active=True,verification_status="VERIFIED",**data)
+        role=Role.objects.get(name=role_name)
+        UserRole.objects.create(user=user,role=role,assigned_by=self.context["request"].user)
+        UserVerification.objects.create(user=user,verified_by=self.context["request"].user,status="VERIFIED",remarks="Created by administrator")
+        return user
+
+class ManagedUserUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model=User
+        fields=["name","email","department","designation","is_active"]

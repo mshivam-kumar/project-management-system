@@ -16,7 +16,7 @@ services:
     environment:
       DJANGO_SECRET_KEY: local-development-only-insecure-secret
       DEBUG: "true"
-      ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      ALLOWED_HOSTS: localhost,127.0.0.1,0.0.0.0,backend
       CORS_ALLOWED_ORIGINS: http://localhost:5173
       POSTGRES_DB: ${POSTGRES_DB:-procurement}
       POSTGRES_USER: ${POSTGRES_USER:-procurement}

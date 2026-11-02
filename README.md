@@ -15,6 +15,7 @@ docker compose up --build
 The first startup builds the Django and React environments, waits for PostgreSQL, creates the app migrations, applies them, and seeds roles, sample departments, and a development Super Admin. Open:
 
 - Frontend: http://localhost:5173
+- Backend status/links: http://localhost:8000/
 - API: http://localhost:8000/api/v1/
 - Django admin: http://localhost:8000/admin/
 
@@ -55,6 +56,8 @@ Log in at `/login` after verification. The API login endpoint is `POST /api/v1/a
 - Project detail drawer, message posting, and PDF upload/download endpoints with a 10 MB upload limit.
 - Vendor CRUD and verification endpoints; audit and notification foundations.
 - Frontend dashboard with project search, filters, pagination, creation, timeline, messaging, and PDF upload. Workflow action buttons are disabled placeholders and do not change project status.
+
+Opening the backend root at http://localhost:8000/ shows a status page with links. Use http://localhost:5173/ to test the actual frontend; the API is not the frontend.
 
 The current UI includes explicit placeholders for tasks, notifications, and admin modules where full management screens are not yet implemented. APIs for some of those modules exist, but this foundation is not yet the complete procurement system.
 

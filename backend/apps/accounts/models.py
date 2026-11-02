@@ -22,7 +22,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     verified_by=models.ForeignKey("self",null=True,blank=True,on_delete=models.SET_NULL,related_name="verified_users")
     verified_at=models.DateTimeField(null=True,blank=True)
     created_at=models.DateTimeField(auto_now_add=True); updated_at=models.DateTimeField(auto_now=True)
-    roles=models.ManyToManyField("Role",through="UserRole",related_name="users")
+    roles=models.ManyToManyField("Role",through="UserRole",through_fields=("user","role"),related_name="users")
     objects=UserManager(); USERNAME_FIELD="email"; REQUIRED_FIELDS=["name"]
     def has_role(self, role): return self.roles.filter(name=role).exists()
     def __str__(self): return self.name

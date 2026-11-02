@@ -30,7 +30,7 @@ class ProcurementProject(models.Model):
             super().save(*args,**kwargs)
     def __str__(self): return f"{self.project_code} {self.title}"
 class ProjectActivity(models.Model):
-    class Type(models.TextChoices): PROJECT_CREATED="PROJECT_CREATED"; PROJECT_SUBMITTED="PROJECT_SUBMITTED"; MESSAGE="MESSAGE"; DOCUMENT_UPLOADED="DOCUMENT_UPLOADED"; DOCUMENT_UPDATED="DOCUMENT_UPDATED"; FORWARDED="FORWARDED"; APPROVED="APPROVED"; RETURNED="RETURNED"; REJECTED="REJECTED"; COMMITTEE_FORMED="COMMITTEE_FORMED"; STATUS_CHANGED="STATUS_CHANGED"
+    class Type(models.TextChoices): PROJECT_CREATED="PROJECT_CREATED"; PROJECT_UPDATED="PROJECT_UPDATED"; PROJECT_SUBMITTED="PROJECT_SUBMITTED"; MESSAGE="MESSAGE"; DOCUMENT_UPLOADED="DOCUMENT_UPLOADED"; DOCUMENT_UPDATED="DOCUMENT_UPDATED"; FORWARDED="FORWARDED"; APPROVED="APPROVED"; RETURNED="RETURNED"; REJECTED="REJECTED"; COMMITTEE_FORMED="COMMITTEE_FORMED"; STATUS_CHANGED="STATUS_CHANGED"
     id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
     project=models.ForeignKey(ProcurementProject,on_delete=models.CASCADE,related_name="activities")
     actor=models.ForeignKey(settings.AUTH_USER_MODEL,null=True,on_delete=models.SET_NULL)
@@ -40,3 +40,12 @@ class ProjectActivity(models.Model):
 class ProjectMessage(models.Model):
     id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False); project=models.ForeignKey(ProcurementProject,on_delete=models.CASCADE,related_name="messages")
     sender=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT); message=models.TextField(); created_at=models.DateTimeField(auto_now_add=True)
+
+class ProjectMember(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    project=models.ForeignKey(ProcurementProject,on_delete=models.CASCADE,related_name="members")
+    user=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name="project_memberships")
+    assigned_by=models.ForeignKey(settings.AUTH_USER_MODEL,null=True,on_delete=models.SET_NULL,related_name="project_assignments")
+    assigned_at=models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=["project","user"],name="unique_project_member")]
