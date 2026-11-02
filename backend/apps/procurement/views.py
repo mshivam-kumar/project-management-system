@@ -27,7 +27,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
         qs=ProcurementProject.objects.select_related("department","created_by").prefetch_related("members__user")
         user=self.request.user
         if has_any_role(user,"ADMIN","SUPER_ADMIN"): return qs
-        return qs.filter(models.Q(created_by=user)|models.Q(members__user=user)).distinct()
+        return qs.filter(
+            models.Q(created_by=user)
+            | models.Q(members__user=user)
+            | models.Q(committees__members__user=user)
+        ).distinct()
 
     @transaction.atomic
     def perform_create(self,serializer):
@@ -180,7 +184,11 @@ class DashboardSummaryView(APIView):
     permission_classes=[IsAuthenticated]
     def get(self,request):
         admin=has_any_role(request.user,"ADMIN","SUPER_ADMIN")
-        projects=ProcurementProject.objects.all() if admin else ProcurementProject.objects.filter(Q(created_by=request.user)|Q(members__user=request.user)).distinct()
+        projects=ProcurementProject.objects.all() if admin else ProcurementProject.objects.filter(
+            Q(created_by=request.user)
+            | Q(members__user=request.user)
+            | Q(committees__members__user=request.user)
+        ).distinct()
         result={
             "total_projects":projects.count(),
             "active_projects":projects.exclude(current_status__in=["APPROVED","REJECTED","CANCELLED"]).count(),

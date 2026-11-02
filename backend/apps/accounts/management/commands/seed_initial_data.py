@@ -103,6 +103,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Development account ready: {details['email']}"))
 
         self.seed_demo_project(User, departments["PROC"])
+        self.seed_workflow_project(User, departments["PROC"])
 
     def seed_demo_project(self, User, department):
         """Create one realistic in-progress record for the manual review flow."""
@@ -116,7 +117,7 @@ class Command(BaseCommand):
         creator = User.objects.get(email="demo.user@procurement.local")
         reviewer = User.objects.get(email="reviewer@procurement.local")
         admin = User.objects.filter(is_superuser=True).first()
-        project, created = ProcurementProject.objects.get_or_create(
+        project, _ = ProcurementProject.objects.get_or_create(
             title="District Hospital Diagnostic Equipment Procurement",
             defaults={
                 "description": "Open tender for diagnostic imaging equipment, installation, training, and a three-year maintenance plan.",
@@ -126,9 +127,6 @@ class Command(BaseCommand):
                 "current_status": "COMMITTEE_REVIEW",
             },
         )
-        if not created:
-            return
-
         ProjectMember.objects.get_or_create(project=project, user=creator, defaults={"assigned_by": admin})
         ProjectMember.objects.get_or_create(project=project, user=reviewer, defaults={"assigned_by": admin})
         if admin:
@@ -145,21 +143,20 @@ class Command(BaseCommand):
             ("VENDOR_ASSOCIATED", "Verified vendor associated: Aster Clinical Systems Pvt Ltd."),
             ("FORWARDED", "Committee Formation → Committee Review. Evaluation pack circulated to members."),
         ]
-        document_activity = None
+        # Fill in any missing entries if a prior seed run stopped midway.
         for event_type, message in trail:
-            activity = ProjectActivity.objects.create(
+            ProjectActivity.objects.get_or_create(
                 project=project,
-                actor=creator,
                 activity_type=event_type,
                 message=message,
+                defaults={"actor": creator},
             )
-            if event_type == "DOCUMENT_UPLOADED":
-                document_activity = activity
+        document_activity = project.activities.filter(activity_type="DOCUMENT_UPLOADED").first()
 
-        committee = Committee.objects.create(
+        committee, _ = Committee.objects.get_or_create(
             project=project,
             committee_name="Diagnostic Equipment Technical Evaluation Committee",
-            formed_by=admin or creator,
+            defaults={"formed_by": admin or creator},
         )
         CommitteeMember.objects.get_or_create(
             committee=committee,
@@ -182,7 +179,7 @@ class Command(BaseCommand):
             name="Medical Equipment",
             defaults={"description": "Diagnostic and clinical equipment suppliers"},
         )
-        vendor, vendor_created = Vendor.objects.get_or_create(
+        vendor, _ = Vendor.objects.get_or_create(
             vendor_name="Aster Clinical Systems Pvt Ltd",
             defaults={
                 "registration_number": "U85110DL2020PTC123456",
@@ -197,7 +194,11 @@ class Command(BaseCommand):
         )
         VendorCategoryMapping.objects.get_or_create(vendor=vendor, category=category)
         ProjectVendor.objects.get_or_create(project=project, vendor=vendor)
-        if not Document.objects.filter(project=project).exists():
+        document = Document.objects.filter(
+            project=project,
+            document_name="Diagnostic_Equipment_Requirements.pdf",
+        ).first()
+        if document is None:
             document = Document.objects.create(
                 project=project,
                 activity=document_activity,
@@ -207,6 +208,10 @@ class Command(BaseCommand):
                 mime_type="application/pdf",
                 file_size=0,
             )
+        elif document.activity_id is None and document_activity:
+            document.activity = document_activity
+            document.save(update_fields=["activity"])
+        if not document.versions.exists():
             pdf = self.sample_pdf(project.project_code)
             version = DocumentVersion.objects.create(
                 document=document,
@@ -225,6 +230,79 @@ class Command(BaseCommand):
             )
 
         self.stdout.write(self.style.SUCCESS(f"Demo project ready: {project.project_code}"))
+
+    def seed_workflow_project(self, User, department):
+        """Create a clean Draft project for manually exercising every stage."""
+        from django.core.files.base import ContentFile
+        from apps.audit.models import AuditLog
+        from apps.documents.models import Document, DocumentVersion
+        from apps.procurement.models import ProcurementProject, ProjectActivity
+        from apps.vendors.models import ProjectVendor, Vendor
+
+        creator = User.objects.get(email="demo.user@procurement.local")
+        project, _ = ProcurementProject.objects.get_or_create(
+            title="Full Workflow Test — Diagnostic Imaging Equipment",
+            defaults={
+                "description": "A clean local test case. Progress this from Draft through submission, review, committee formation, committee review, and final approval.",
+                "department": department,
+                "created_by": creator,
+                "estimated_amount": "7200000.00",
+                "current_status": "DRAFT",
+            },
+        )
+        if not project.activities.exists():
+            ProjectActivity.objects.create(
+                project=project,
+                actor=creator,
+                activity_type="PROJECT_CREATED",
+                message="Clean full-workflow test project created in Draft.",
+            )
+        vendor = Vendor.objects.filter(vendor_name="Aster Clinical Systems Pvt Ltd").first()
+        if vendor:
+            ProjectVendor.objects.get_or_create(project=project, vendor=vendor)
+        document, _ = Document.objects.get_or_create(
+            project=project,
+            document_name="Workflow_Test_Specification.pdf",
+            defaults={
+                "activity": project.activities.filter(activity_type="PROJECT_CREATED").first(),
+                "uploaded_by": creator,
+                "document_type": "PDF",
+                "mime_type": "application/pdf",
+                "file_size": 0,
+            },
+        )
+        if not document.versions.exists():
+            pdf = self.sample_pdf(project.project_code)
+            version = DocumentVersion.objects.create(
+                document=document,
+                version_number=1,
+                uploaded_by=creator,
+                storage_path=ContentFile(pdf, name="Workflow_Test_Specification.pdf"),
+            )
+            activity, _ = ProjectActivity.objects.get_or_create(
+                project=project,
+                activity_type="DOCUMENT_UPLOADED",
+                message=f"Uploaded {document.document_name} (version {version.version_number}).",
+                defaults={"actor": creator},
+            )
+            document.activity = activity
+            document.file_size = len(pdf)
+            document.save(update_fields=["activity", "file_size"])
+            AuditLog.objects.get_or_create(
+                entity_type="document",
+                entity_id=str(document.id),
+                operation="DOCUMENT_UPLOADED",
+                defaults={
+                    "user": creator,
+                    "new_values": {"version": version.version_number, "name": document.document_name},
+                },
+            )
+        elif document.activity_id is None:
+            activity = project.activities.filter(activity_type="DOCUMENT_UPLOADED").first()
+            if activity:
+                document.activity = activity
+                document.save(update_fields=["activity"])
+        self.stdout.write(self.style.SUCCESS(f"Full workflow test project ready: {project.project_code} (status: {project.current_status})"))
 
     @staticmethod
     def sample_pdf(project_code):

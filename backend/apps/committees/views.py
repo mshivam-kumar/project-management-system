@@ -18,7 +18,11 @@ class CommitteeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs=Committee.objects.select_related("project","formed_by").prefetch_related("members__user")
         if has_any_role(self.request.user,"ADMIN","SUPER_ADMIN"): return qs
-        return qs.filter(Q(project__created_by=self.request.user)|Q(project__members__user=self.request.user)).distinct()
+        return qs.filter(
+            Q(project__created_by=self.request.user)
+            | Q(project__members__user=self.request.user)
+            | Q(members__user=self.request.user)
+        ).distinct()
     @transaction.atomic
     def perform_create(self,serializer):
         project=serializer.validated_data["project"]

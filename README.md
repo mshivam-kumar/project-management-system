@@ -2,6 +2,8 @@
 
 Local development foundation for procurement projects, user verification, vendor registry, document collaboration, audit history, and committee setup.
 
+Guides: [How to use the software](USAGE_GUIDE.md) · [Manual functionality test guide](MANUAL_TEST_GUIDE.md).
+
 ## Start the application
 
 Prerequisite: Docker Engine with Docker Compose.
@@ -33,7 +35,13 @@ These demo accounts are created only when Django `DEBUG` is enabled. Use either 
 docker compose restart backend
 ```
 
-The same development seed creates **PR-… District Hospital Diagnostic Equipment Procurement** in **Committee Review**, with a populated Technical Evaluation Committee, three committee members, an associated verified medical equipment vendor, a stage history, and a sample requirements PDF. The seeded project is created only once; later backend restarts preserve your changes to its status, committee, and documents.
+The development seed creates two manual-test projects: **District Hospital Diagnostic Equipment Procurement** in **Committee Review**, with its populated committee, verified vendor, stage history, and sample PDF; and **Full Workflow Test — Diagnostic Imaging Equipment** in **Draft**, ready to move through every stage, with a sample PDF and verified vendor. It also creates the reviewer and regular-user accounts. Seed data is added if missing and does not reset project progress or overwrite local test records on backend restart.
+
+If the containers are already running and you want to add any missing seed records, run:
+
+```sh
+docker compose exec backend python manage.py seed_initial_data
+```
 
 These credentials and the Django secret in Compose are local development defaults only. Do not expose this configuration to a public network or reuse the values for deployment.
 
@@ -91,7 +99,7 @@ Use a small valid PDF (up to 10 MB) when testing uploads.
 - Committees: `/api/v1/committees/`, committee `members` action
 - Notifications and audit: `/api/v1/notifications/`, notification `read` action, `/api/v1/audit-logs/`
 
-DRF pagination, search, filters, validation, and backend permissions are enabled. Regular users can access projects they created or have been assigned to; admins can view all projects. Only active, verified vendors can be attached to projects. Historical verification and audit records are not exposed for modification.
+DRF pagination, search, filters, validation, and backend permissions are enabled. Regular users can access projects they created, have been assigned to, or are committee members on; admins can view all projects. Committee membership grants access to that project and its protected details, while unrelated users cannot access it. Only active, verified vendors can be attached to projects. Historical verification and audit records are not exposed for modification.
 
 ## Storage and configuration
 
