@@ -4,17 +4,33 @@ Local development foundation for procurement projects, user verification, vendor
 
 Guides: [How to use the software](USAGE_GUIDE.md) · [Manual functionality test guide](MANUAL_TEST_GUIDE.md).
 
-## Start the application
+## Fresh PC setup
 
-Prerequisite: Docker Engine with Docker Compose.
+Install Docker Desktop on [Windows](https://docs.docker.com/desktop/setup/install/windows-install/), [macOS](https://docs.docker.com/desktop/setup/install/mac-install/), or [Linux](https://docs.docker.com/desktop/setup/install/linux/). On Linux, you can also install Docker Engine and the [Docker Compose plugin](https://docs.docker.com/compose/install/linux/). Start Docker Desktop or the Docker service before continuing. On Windows, use Linux containers (the Docker Desktop default).
 
-From the project root:
+No host installation of Python, Node.js, or PostgreSQL is needed. Docker builds the backend image and installs Python packages from `backend/requirements.txt`; the frontend container installs npm dependencies from `frontend/package-lock.json`; PostgreSQL runs in its own container.
+
+Check Docker and Compose are available:
 
 ```sh
-docker compose up --build
+docker --version
+docker compose version
 ```
 
-The first startup builds the services, waits for PostgreSQL, generates and applies Django migrations, seeds sample departments and roles, and creates a development Super Admin plus ready-to-use demo accounts.
+Download or clone the repository, open a terminal in its root directory (the folder containing `docker-compose.yml`), then build and start the stack:
+
+```sh
+docker compose up --build -d
+```
+
+The first run needs an internet connection to download the container images and install packages. Check startup:
+
+```sh
+docker compose ps
+docker compose logs --tail=100 backend
+```
+
+Wait for the database and backend to report healthy. The backend then generates and applies Django migrations and seeds sample departments, roles, users, and projects. The frontend starts after the backend is healthy.
 
 - **Frontend:** http://localhost:5173/
 - **Backend status page:** http://localhost:8000/
@@ -29,7 +45,7 @@ Other local development accounts use the password `procurement-demo-2026`:
 - Verified committee reviewer: `reviewer@procurement.local`
 - Pending regular user: `pending.user@procurement.local` (cannot sign in until an admin verifies it)
 
-These demo accounts are created only when Django `DEBUG` is enabled. Use either verified account to sign in immediately, or sign in as the admin and approve the pending user under **User Management**. The accounts are seeded on backend startup, so restart the backend if you have already started the stack:
+These demo accounts are created only when Django `DEBUG` is enabled. Use either verified account to sign in immediately, or sign in as the admin and approve the pending user under **User Management**. Accounts and projects are seeded on backend startup. If the stack was running before you updated the repository, restart the backend to load its new code and rerun startup seeding:
 
 ```sh
 docker compose restart backend
@@ -42,6 +58,17 @@ If the containers are already running and you want to add any missing seed recor
 ```sh
 docker compose exec backend python manage.py seed_initial_data
 ```
+
+If dependency installation fails, confirm Docker has internet access, then rebuild and recreate the services:
+
+```sh
+docker compose down
+docker compose build --no-cache backend
+docker compose up --build -d
+docker compose logs --tail=100 backend frontend
+```
+
+The backend image build runs `pip install -r requirements.txt`. The frontend startup runs `npm ci` against the committed lockfile. `docker compose restart` only restarts existing containers; use `docker compose up --build -d` after changing Dockerfiles or backend Python requirements.
 
 These credentials and the Django secret in Compose are local development defaults only. Do not expose this configuration to a public network or reuse the values for deployment.
 
@@ -64,7 +91,7 @@ Build-check the frontend:
 docker compose exec frontend npm run build
 ```
 
-Stop the services with Ctrl+C. To remove services and the local database volume, run `docker compose down -v` (this deletes local test data).
+Stop the services with `docker compose down`. To remove the local database and uploaded documents, run `docker compose down -v` (this deletes local test data).
 
 ## End-to-end test walkthrough
 
