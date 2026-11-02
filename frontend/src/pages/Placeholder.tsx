@@ -1,0 +1,2 @@
+import {Construction} from 'lucide-react';
+export default function Placeholder({title}:{title:string}){return <div className="content"><div className="heading"><div><h1>{title}</h1><div className="muted">This module is reserved for the next implementation phase.</div></div></div><div className="placeholder"><Construction size={22}/><h3>Not available yet</h3><p>This area is intentionally a placeholder. No actions are being simulated.</p></div></div>}
