@@ -30,7 +30,7 @@ docker compose ps
 docker compose logs --tail=100 backend
 ```
 
-Wait for the database and backend to report healthy. The backend then generates and applies Django migrations and seeds sample departments, roles, users, and projects. The frontend starts after the backend is healthy.
+Wait for the database and backend to report healthy. The backend applies the Django migrations included in the repository and seeds sample departments, roles, users, and projects. The frontend starts after the backend is healthy.
 
 - **Frontend:** http://localhost:5173/
 - **Backend status page:** http://localhost:8000/
@@ -72,7 +72,25 @@ The backend image build runs `pip install -r requirements.txt`. The frontend sta
 
 These credentials and the Django secret in Compose are local development defaults only. Do not expose this configuration to a public network or reuse the values for deployment.
 
-When changing backend models, restart the backend to generate and apply new migrations:
+When changing backend models, generate a migration and then apply it:
+
+```sh
+docker compose exec backend python manage.py makemigrations
+docker compose exec backend python manage.py migrate
+```
+
+Commit the generated migration file with the model change so a fresh checkout can build the database schema. The backend applies committed migrations automatically at startup.
+
+If this is a brand-new local database and a previous failed startup left a partially created schema, remove the local test database and restart:
+
+```sh
+docker compose down -v
+docker compose up --build -d
+```
+
+`docker compose down -v` permanently deletes the local PostgreSQL data and uploaded documents. Use it only when you have no local test data to keep.
+
+For a normal backend restart (which applies migrations and runs the seed command):
 
 ```sh
 docker compose restart backend

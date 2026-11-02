@@ -12,7 +12,7 @@ docker compose ps
 docker compose logs --tail=100 backend
 ```
 
-Wait until the `backend` and `db` containers are healthy. In backend logs, look for the startup seed messages for the admin, demo users, and both demo projects. Open [http://localhost:5173/](http://localhost:5173/).
+Wait until the `backend` and `db` containers are healthy. The backend applies repository migrations and seeds the admin, demo users, and both demo projects. Check backend logs if startup does not complete. Open [http://localhost:5173/](http://localhost:5173/).
 
 If the stack was already running when code changed, restart the backend to run its startup seed and restart frontend if the browser still shows the old UI:
 
