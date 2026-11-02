@@ -1,3 +1,4 @@
+from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from .models import User, Role, UserRole, UserVerification
 class UserSerializer(serializers.ModelSerializer):
@@ -7,6 +8,9 @@ class UserSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password=serializers.CharField(write_only=True,min_length=10)
     class Meta: model=User; fields=["name","email","password","department","designation"]
+    def validate_password(self,value):
+        validate_password(value)
+        return value
     def create(self,data):
         user=User.objects.create_user(**data); role,_=Role.objects.get_or_create(name="USER",defaults={"description":"Regular user"}); UserRole.objects.create(user=user,role=role); UserVerification.objects.create(user=user,status="PENDING",remarks="Registration submitted"); return user
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -23,11 +27,14 @@ class ManagedUserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model=User
         fields=["name","email","password","department","designation","role"]
+    def validate_password(self,value):
+        validate_password(value)
+        return value
     def create(self,data):
         role_name=data.pop("role")
         password=data.pop("password")
         user=User.objects.create_user(password=password,is_active=True,verification_status="VERIFIED",**data)
-        role=Role.objects.get(name=role_name)
+        role,_=Role.objects.get_or_create(name=role_name)
         UserRole.objects.create(user=user,role=role,assigned_by=self.context["request"].user)
         UserVerification.objects.create(user=user,verified_by=self.context["request"].user,status="VERIFIED",remarks="Created by administrator")
         return user

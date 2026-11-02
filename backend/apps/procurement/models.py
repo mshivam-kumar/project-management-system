@@ -13,7 +13,10 @@ class ProcurementProject(models.Model):
     estimated_amount=models.DecimalField(max_digits=14,decimal_places=2,default=0)
     current_status=models.CharField(max_length=32,choices=ProjectStatus.choices,default=ProjectStatus.DRAFT)
     created_at=models.DateTimeField(auto_now_add=True); updated_at=models.DateTimeField(auto_now=True)
-    class Meta: ordering=["-updated_at"]; indexes=[models.Index(fields=["current_status","department"])]
+    class Meta:
+        ordering=["-updated_at"]
+        indexes=[models.Index(fields=["current_status","department"])]
+        constraints=[models.CheckConstraint(condition=models.Q(estimated_amount__gte=0),name="project_amount_nonnegative")]
     def save(self,*args,**kwargs):
         if not self.project_code:
             with transaction.atomic():
@@ -30,10 +33,11 @@ class ProcurementProject(models.Model):
             super().save(*args,**kwargs)
     def __str__(self): return f"{self.project_code} {self.title}"
 class ProjectActivity(models.Model):
-    class Type(models.TextChoices): PROJECT_CREATED="PROJECT_CREATED"; PROJECT_UPDATED="PROJECT_UPDATED"; PROJECT_SUBMITTED="PROJECT_SUBMITTED"; MESSAGE="MESSAGE"; DOCUMENT_UPLOADED="DOCUMENT_UPLOADED"; DOCUMENT_UPDATED="DOCUMENT_UPDATED"; FORWARDED="FORWARDED"; APPROVED="APPROVED"; RETURNED="RETURNED"; REJECTED="REJECTED"; COMMITTEE_FORMED="COMMITTEE_FORMED"; STATUS_CHANGED="STATUS_CHANGED"
+    class Type(models.TextChoices): PROJECT_CREATED="PROJECT_CREATED"; PROJECT_UPDATED="PROJECT_UPDATED"; PROJECT_SUBMITTED="PROJECT_SUBMITTED"; MESSAGE="MESSAGE"; DOCUMENT_UPLOADED="DOCUMENT_UPLOADED"; DOCUMENT_UPDATED="DOCUMENT_UPDATED"; USER_ASSIGNED="USER_ASSIGNED"; VENDOR_ASSOCIATED="VENDOR_ASSOCIATED"; FORWARDED="FORWARDED"; APPROVED="APPROVED"; RETURNED="RETURNED"; REJECTED="REJECTED"; COMMITTEE_FORMED="COMMITTEE_FORMED"; STATUS_CHANGED="STATUS_CHANGED"
     id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
     project=models.ForeignKey(ProcurementProject,on_delete=models.CASCADE,related_name="activities")
     actor=models.ForeignKey(settings.AUTH_USER_MODEL,null=True,on_delete=models.SET_NULL)
+    project_message=models.ForeignKey("ProjectMessage",null=True,blank=True,on_delete=models.SET_NULL,related_name="activities")
     activity_type=models.CharField(max_length=32,choices=Type.choices); message=models.TextField(blank=True)
     created_at=models.DateTimeField(auto_now_add=True)
     class Meta: ordering=["created_at"]

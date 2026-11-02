@@ -11,12 +11,14 @@ from apps.procurement.views import ProjectViewSet, DashboardSummaryView
 from apps.vendors.views import VendorViewSet, VendorCategoryViewSet
 from apps.audit.views import AuditLogViewSet
 from apps.notifications.views import NotificationViewSet
+from apps.committees.views import CommitteeViewSet
 from apps.accounts.views import LogoutView, PasswordChangeView
 
 router = DefaultRouter()
 router.register("users", UserViewSet)
 router.register("departments", DepartmentViewSet)
 router.register("projects", ProjectViewSet, basename="project")
+router.register("committees", CommitteeViewSet, basename="committee")
 router.register("vendors", VendorViewSet)
 router.register("vendor-categories", VendorCategoryViewSet, basename="vendor-category")
 router.register("audit-logs", AuditLogViewSet, basename="audit-log")

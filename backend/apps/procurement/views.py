@@ -10,11 +10,13 @@ from apps.accounts.models import User
 from apps.accounts.permissions import IsAdminOrSuperAdmin, has_any_role
 from apps.audit.models import AuditLog
 from apps.documents.models import Document, DocumentVersion
+from apps.vendors.models import Vendor, ProjectVendor
 from apps.notifications.models import Notification
 from .models import ProcurementProject, ProjectActivity, ProjectMessage, ProjectMember
 from .serializers import ProjectSerializer, ActivitySerializer, MessageSerializer, ProjectMemberSerializer
 
 class ProjectViewSet(viewsets.ModelViewSet):
+    http_method_names=["get","post","patch","head","options"]
     serializer_class=ProjectSerializer
     permission_classes=[IsAuthenticated]
     search_fields=["project_code","title","description"]
@@ -35,9 +37,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_update(self,serializer):
+        instance=serializer.instance; old={"title":instance.title,"description":instance.description,"department":str(instance.department_id),"estimated_amount":str(instance.estimated_amount)}
         project=serializer.save()
         ProjectActivity.objects.create(project=project,actor=self.request.user,activity_type="PROJECT_UPDATED",message="Project details updated")
-        AuditLog.objects.create(user=self.request.user,entity_type="project",entity_id=str(project.id),operation="UPDATE",new_values={"title":project.title,"description":project.description})
+        AuditLog.objects.create(user=self.request.user,entity_type="project",entity_id=str(project.id),operation="UPDATE",old_values=old,new_values={"title":project.title,"description":project.description,"department":str(project.department_id),"estimated_amount":str(project.estimated_amount)})
 
     @action(detail=True,methods=["get"])
     def activities(self,request,pk=None):
@@ -50,7 +53,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def messages(self,request,pk=None):
         project=self.get_object(); serializer=MessageSerializer(data=request.data); serializer.is_valid(raise_exception=True)
         message=serializer.save(project=project,sender=request.user)
-        ProjectActivity.objects.create(project=project,actor=request.user,activity_type="MESSAGE",message=message.message)
+        ProjectActivity.objects.create(project=project,actor=request.user,project_message=message,activity_type="MESSAGE")
         AuditLog.objects.create(user=request.user,entity_type="project",entity_id=str(project.id),operation="MESSAGE",new_values={"message_id":str(message.id)})
         return Response(MessageSerializer(message).data,status=201)
 
@@ -59,8 +62,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def documents(self,request,pk=None):
         project=self.get_object()
         if request.method=="GET":
-            rows=project.documents.select_related("uploaded_by").all()
-            return Response([{"id":str(d.id),"document_name":d.document_name,"file_size":d.file_size,"uploaded_by":d.uploaded_by.name,"created_at":d.created_at,"download_url":f"/api/v1/projects/{project.id}/documents/{d.id}/download/"} for d in rows])
+            rows=project.documents.select_related("uploaded_by").prefetch_related("versions").all()
+            return Response([{"id":str(d.id),"document_name":d.document_name,"file_size":d.file_size,"uploaded_by":d.uploaded_by.name,"created_at":d.created_at,"current_version":max([v.version_number for v in d.versions.all()] or [0]),"download_url":f"/api/v1/projects/{project.id}/documents/{d.id}/download/"} for d in rows])
         uploaded=request.FILES.get("file")
         if not uploaded: raise ValidationError({"file":"PDF file is required."})
         if uploaded.size>10*1024*1024: raise ValidationError({"file":"Maximum file size is 10 MB."})
@@ -79,9 +82,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
             version_number=1; activity_type="DOCUMENT_UPLOADED"
         version=DocumentVersion.objects.create(document=document,version_number=version_number,uploaded_by=request.user,storage_path=uploaded)
         activity=ProjectActivity.objects.create(project=project,actor=request.user,activity_type=activity_type,message=f"{('Updated' if version_number>1 else 'Uploaded')} {document.document_name}")
-        document.activity=activity; document.save(update_fields=["activity"])
+        document.activity=activity; document.file_size=uploaded.size; document.uploaded_by=request.user
+        document.save(update_fields=["activity","file_size","uploaded_by"])
         AuditLog.objects.create(user=request.user,entity_type="document",entity_id=str(document.id),operation=activity_type,new_values={"version":version_number,"name":document.document_name})
-        for recipient_id in project.members.exclude(user=request.user).values_list("user_id",flat=True):
+        recipients=set(project.members.exclude(user=request.user).values_list("user_id",flat=True))
+        if project.created_by_id!=request.user.id: recipients.add(project.created_by_id)
+        for recipient_id in recipients:
             Notification.objects.create(recipient_id=recipient_id,project=project,title="Project document updated",message=f"{document.document_name} was added to {project.project_code}.")
         return Response({"id":str(document.id),"name":document.document_name,"version":version.version_number},status=201)
 
@@ -102,10 +108,28 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if request.method=="GET": return Response(ProjectMemberSerializer(project.members.select_related("user").all(),many=True).data)
         try: user=User.objects.get(id=request.data.get("user"),is_active=True,verification_status="VERIFIED")
         except User.DoesNotExist: raise ValidationError({"user":"Choose an active, verified user."})
-        membership,_=ProjectMember.objects.get_or_create(project=project,user=user,defaults={"assigned_by":request.user})
-        AuditLog.objects.create(user=request.user,entity_type="project",entity_id=str(project.id),operation="ASSIGN_MEMBER",new_values={"user":str(user.id)})
-        Notification.objects.create(recipient=user,project=project,title="Project assigned",message=f"You were assigned to {project.project_code}: {project.title}.")
-        return Response(ProjectMemberSerializer(membership).data,status=201)
+        membership,created=ProjectMember.objects.get_or_create(project=project,user=user,defaults={"assigned_by":request.user})
+        if created:
+            AuditLog.objects.create(user=request.user,entity_type="project",entity_id=str(project.id),operation="ASSIGN_MEMBER",new_values={"user":str(user.id)})
+            ProjectActivity.objects.create(project=project,actor=request.user,activity_type="USER_ASSIGNED",message=f"{user.name} was assigned to the project")
+            Notification.objects.create(recipient=user,project=project,title="Project assigned",message=f"You were assigned to {project.project_code}: {project.title}.")
+        return Response(ProjectMemberSerializer(membership).data,status=201 if created else 200)
+
+    @action(detail=True,methods=["get","post"])
+    @transaction.atomic
+    def vendors(self,request,pk=None):
+        project=self.get_object()
+        if request.method=="GET":
+            eligible=Vendor.objects.filter(is_active=True,verification_status="VERIFIED").values("id","vendor_name","registration_number")
+            associated=ProjectVendor.objects.filter(project=project).select_related("vendor")
+            return Response({"eligible_vendors":list(eligible),"associated_vendors":[{"id":str(x.id),"vendor_id":str(x.vendor_id),"vendor_name":x.vendor.vendor_name,"participation_status":x.participation_status} for x in associated]})
+        try: vendor=Vendor.objects.get(id=request.data.get("vendor"),is_active=True,verification_status="VERIFIED")
+        except Vendor.DoesNotExist: raise ValidationError({"vendor":"Choose an active, verified vendor."})
+        link,created=ProjectVendor.objects.get_or_create(project=project,vendor=vendor)
+        if created:
+            AuditLog.objects.create(user=request.user,entity_type="project_vendor",entity_id=str(link.id),operation="ASSOCIATE",new_values={"project":str(project.id),"vendor":str(vendor.id)})
+            ProjectActivity.objects.create(project=project,actor=request.user,activity_type="VENDOR_ASSOCIATED",message=f"Vendor associated: {vendor.vendor_name}")
+        return Response({"id":str(link.id),"vendor_id":str(vendor.id),"vendor_name":vendor.vendor_name,"participation_status":link.participation_status},status=201 if created else 200)
 
 from rest_framework.views import APIView
 from django.db.models import Count, Q

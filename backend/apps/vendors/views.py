@@ -14,17 +14,21 @@ from .models import Vendor,VendorVerification,VendorCategory,VendorDocument
 from .serializers import VendorSerializer,VendorCategorySerializer
 
 class VendorViewSet(viewsets.ModelViewSet):
+    http_method_names=["get","post","patch","head","options"]
     queryset=Vendor.objects.all().prefetch_related("categories")
     serializer_class=VendorSerializer
     permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin]
     search_fields=["vendor_name","registration_number","gstin","email"]
     filterset_fields=["verification_status","is_active","categories"]
+    @transaction.atomic
     def perform_create(self,serializer):
         vendor=serializer.save()
         AuditLog.objects.create(user=self.request.user,entity_type="vendor",entity_id=str(vendor.id),operation="CREATE",new_values={"vendor_name":vendor.vendor_name})
+    @transaction.atomic
     def perform_update(self,serializer):
+        instance=serializer.instance; old={"vendor_name":instance.vendor_name,"verification_status":instance.verification_status,"is_active":instance.is_active}
         vendor=serializer.save()
-        AuditLog.objects.create(user=self.request.user,entity_type="vendor",entity_id=str(vendor.id),operation="UPDATE",new_values={"vendor_name":vendor.vendor_name})
+        AuditLog.objects.create(user=self.request.user,entity_type="vendor",entity_id=str(vendor.id),operation="UPDATE",old_values=old,new_values={"vendor_name":vendor.vendor_name,"verification_status":vendor.verification_status,"is_active":vendor.is_active})
     @action(detail=True,methods=["post"])
     @transaction.atomic
     def verify(self,request,pk=None): return self._decide(request,"VERIFIED")

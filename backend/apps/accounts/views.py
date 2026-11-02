@@ -1,3 +1,5 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, status, viewsets
@@ -28,12 +30,14 @@ class PasswordChangeView(APIView):
     def post(self,request):
         old=request.data.get("old_password",""); new=request.data.get("new_password","")
         if not request.user.check_password(old): return Response({"old_password":"Current password is incorrect."},status=400)
-        if len(new)<10: return Response({"new_password":"Use at least 10 characters."},status=400)
+        try: validate_password(new,request.user)
+        except DjangoValidationError as error: return Response({"new_password":list(error.messages)},status=400)
         request.user.set_password(new); request.user.save(update_fields=["password"])
         AuditLog.objects.create(user=request.user,entity_type="user",entity_id=str(request.user.id),operation="PASSWORD_CHANGE")
         return Response({"detail":"Password updated."})
 
 class UserViewSet(viewsets.ModelViewSet):
+    http_method_names=["get","post","patch","head","options"]
     serializer_class=UserSerializer
     queryset=User.objects.select_related("department").prefetch_related("roles")
     permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin]
@@ -51,8 +55,10 @@ class UserViewSet(viewsets.ModelViewSet):
             AuditLog.objects.create(user=self.request.user,entity_type="user",entity_id=str(user.id),operation="CREATE",new_values={"email":user.email,"roles":list(user.roles.values_list("name",flat=True))})
     def perform_update(self,serializer):
         with transaction.atomic():
+            instance=serializer.instance
+            old={"name":instance.name,"email":instance.email,"department":str(instance.department_id) if instance.department_id else None,"designation":instance.designation,"is_active":instance.is_active}
             user=serializer.save()
-            AuditLog.objects.create(user=self.request.user,entity_type="user",entity_id=str(user.id),operation="UPDATE",new_values={"email":user.email,"is_active":user.is_active})
+            AuditLog.objects.create(user=self.request.user,entity_type="user",entity_id=str(user.id),operation="UPDATE",old_values=old,new_values={"name":user.name,"email":user.email,"department":str(user.department_id) if user.department_id else None,"designation":user.designation,"is_active":user.is_active})
     @action(detail=True,methods=["post"],permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin])
     @transaction.atomic
     def verify(self,request,pk=None):
