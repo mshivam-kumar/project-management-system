@@ -47,7 +47,7 @@ class VendorViewSet(viewsets.ModelViewSet):
     def documents(self,request,pk=None):
         vendor=self.get_object()
         if request.method=="GET":
-            return Response([{"id":str(d.id),"document_name":d.document_name,"document_type":d.document_type,"uploaded_at":d.uploaded_at,"download_url":f"/api/v1/vendors/{vendor.id}/documents/{d.id}/download/"} for d in vendor.documents.all()])
+            return Response([{"id":str(d.id),"document_name":d.document_name,"document_type":d.document_type,"uploaded_at":d.uploaded_at,"download_url":f"/vendors/{vendor.id}/documents/{d.id}/download/"} for d in vendor.documents.all()])
         uploaded=request.FILES.get("file")
         if not uploaded: raise ValidationError({"file":"A PDF file is required."})
         if uploaded.size>10*1024*1024 or uploaded.content_type!="application/pdf" or not uploaded.name.lower().endswith(".pdf"):

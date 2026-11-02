@@ -67,7 +67,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project=self.get_object()
         if request.method=="GET":
             rows=project.documents.select_related("uploaded_by").prefetch_related("versions").all()
-            return Response([{"id":str(d.id),"document_name":d.document_name,"file_size":d.file_size,"uploaded_by":d.uploaded_by.name,"created_at":d.created_at,"current_version":max([v.version_number for v in d.versions.all()] or [0]),"download_url":f"/api/v1/projects/{project.id}/documents/{d.id}/download/"} for d in rows])
+            return Response([{"id":str(d.id),"document_name":d.document_name,"file_size":d.file_size,"uploaded_by":d.uploaded_by.name,"created_at":d.created_at,"current_version":max([v.version_number for v in d.versions.all()] or [0]),"download_url":f"/projects/{project.id}/documents/{d.id}/download/"} for d in rows])
         uploaded=request.FILES.get("file")
         if not uploaded: raise ValidationError({"file":"PDF file is required."})
         if uploaded.size>10*1024*1024: raise ValidationError({"file":"Maximum file size is 10 MB."})

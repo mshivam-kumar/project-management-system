@@ -8,7 +8,7 @@ class ActivitySerializer(serializers.ModelSerializer):
     def get_message(self,obj): return obj.project_message.message if obj.project_message_id else obj.message
     documents=serializers.SerializerMethodField()
     def get_documents(self,obj):
-        return [{"id":str(d.id),"name":d.document_name,"url":f"/api/v1/projects/{obj.project_id}/documents/{d.id}/download/"} for d in obj.document_set.all()]
+        return [{"id":str(d.id),"name":d.document_name,"url":f"/projects/{obj.project_id}/documents/{d.id}/download/"} for d in obj.document_set.all()]
     class Meta: model=ProjectActivity; fields=["id","actor","actor_name","actor_designation","activity_type","message","created_at","documents"]
 class ProjectSerializer(serializers.ModelSerializer):
     estimated_amount=serializers.DecimalField(max_digits=14,decimal_places=2,min_value=Decimal("0"))
