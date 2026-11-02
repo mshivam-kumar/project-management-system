@@ -98,8 +98,46 @@ class ProjectViewSet(viewsets.ModelViewSet):
         version=document.versions.order_by("-version_number").first()
         if not version: raise NotFound("Document file not found")
         response=FileResponse(version.storage_path.open("rb"),content_type="application/pdf")
-        response["Content-Disposition"]=f'attachment; filename="{document.document_name}"'
+        response["Content-Disposition"]=f'inline; filename="{document.document_name}"'
         return response
+
+    @action(detail=True,methods=["post"],permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin],url_path="workflow-action")
+    @transaction.atomic
+    def workflow_action(self,request,pk=None):
+        project=self.get_object()
+        action_name=(request.data.get("action") or "").upper()
+        remarks=(request.data.get("remarks") or "").strip()
+        transitions={
+            ("DRAFT","SUBMIT"):"SUBMITTED",
+            ("RETURNED","SUBMIT"):"SUBMITTED",
+            ("SUBMITTED","FORWARD"):"UNDER_REVIEW",
+            ("UNDER_REVIEW","FORWARD"):"COMMITTEE_FORMATION",
+            ("COMMITTEE_FORMATION","FORWARD"):"COMMITTEE_REVIEW",
+            ("COMMITTEE_REVIEW","FORWARD"):"PENDING_APPROVAL",
+            ("PENDING_APPROVAL","APPROVE"):"APPROVED",
+            ("SUBMITTED","RETURN"):"RETURNED",
+            ("UNDER_REVIEW","RETURN"):"RETURNED",
+            ("COMMITTEE_FORMATION","RETURN"):"RETURNED",
+            ("COMMITTEE_REVIEW","RETURN"):"RETURNED",
+            ("PENDING_APPROVAL","RETURN"):"RETURNED",
+            ("SUBMITTED","REJECT"):"REJECTED",
+            ("UNDER_REVIEW","REJECT"):"REJECTED",
+            ("COMMITTEE_FORMATION","REJECT"):"REJECTED",
+            ("COMMITTEE_REVIEW","REJECT"):"REJECTED",
+            ("PENDING_APPROVAL","REJECT"):"REJECTED",
+        }
+        next_status=transitions.get((project.current_status,action_name))
+        if not next_status:
+            raise ValidationError({"action":f"{action_name or 'Choose an action'} is not available while project is {project.current_status}."})
+        previous=project.current_status
+        project.current_status=next_status
+        project.save(update_fields=["current_status","updated_at"])
+        activity_type={"SUBMIT":"PROJECT_SUBMITTED","FORWARD":"FORWARDED","APPROVE":"APPROVED","RETURN":"RETURNED","REJECT":"REJECTED"}[action_name]
+        note=f"{previous.replace('_',' ').title()} → {next_status.replace('_',' ').title()}"
+        if remarks: note=f"{note}. {remarks}"
+        ProjectActivity.objects.create(project=project,actor=request.user,activity_type=activity_type,message=note)
+        AuditLog.objects.create(user=request.user,entity_type="project",entity_id=str(project.id),operation=action_name,new_values={"status":next_status,"remarks":remarks})
+        return Response({"current_status":next_status})
 
     @action(detail=True,methods=["get","post"],permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin])
     @transaction.atomic
