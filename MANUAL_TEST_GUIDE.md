@@ -6,7 +6,13 @@ This guide walks one new procurement project from requirement to CFA approval. I
 
 ## 1. Start the local app
 
-From the repository root, start the services and check that the backend is healthy:
+To start with the exact seeded state described here, reset the local database first. This permanently deletes local PostgreSQL records and test progress; uploaded files in `media/` remain:
+
+```sh
+docker compose down -v
+```
+
+From the repository root, start the services and check that the backend is healthy. Startup applies migrations and seeds the accounts and populated reference project:
 
 ```sh
 docker compose up --build -d
@@ -21,26 +27,30 @@ Open [http://localhost:5173/](http://localhost:5173/) and sign in as the seeded 
 
 If the backend image fails to build or the backend is unhealthy, stop here and resolve that first. The app must be available at `http://localhost:8000/` before the workflow can be tested.
 
-## 2. Create the test project and stage accounts
+## 2. Inspect the seeded scenario and prepare a fresh one
 
-### Create the project
+After a database reset and seed, the database contains one populated reference project: **District Hospital Diagnostic Equipment Procurement**. It is in **TEC Report**, has stage accounts assigned to the project, stage committees, a verified vendor, sample PDFs, query/reply threads, and a timeline through TEC report preparation. Sign in with the accounts below and confirm the project appears in each dashboard. Use it to inspect a populated project and continue the workflow from TEC Report if desired.
+
+The rest of this guide creates a second project, **Manual Procurement Scenario B**, from Draft so you can practice the whole process yourself. The second project is not preseeded; you will assign the existing stage accounts and form its committees as you reach each stage.
+
+### Create the second project
 
 As the administrator, open the dashboard, choose **New project**, and create:
 
-- **Title:** `Manual Procurement Scenario A — Diagnostic Imaging`
+- **Title:** `Manual Procurement Scenario B — Diagnostic Imaging`
 - **Department:** Procurement
 - **Description:** `End-to-end manual test of committee handoffs, tender documents, vendor correspondence, and approvals.`
 - **Estimated amount:** `7200000`
 
 Save it in **Draft**. Open the project drawer and upload a valid PDF named `A-Requirement.pdf` using the paperclip control. Confirm that it appears under **Documents** and can be viewed and downloaded.
 
-The seed command also creates **Full Workflow Test — Diagnostic Imaging Equipment** in Draft with `Workflow_Test_Specification.pdf`. To prepare files for the new scenario, open that seeded project as admin, download its sample PDF, and make copies named as the stages below request. The same sample PDF can be reused for this upload/version walkthrough; the file content is not evaluated by the workflow. Alternatively, use your own valid PDFs. Use the seeded Draft project itself only if you do not want to create a separate test project. Do not use the in-progress District Hospital sample for a fresh run.
+To prepare files for the new scenario, open the seeded District Hospital project as admin, download `Diagnostic_Equipment_Requirements.pdf`, and make copies named as the stages below request. The same sample PDF can be reused for this upload/version walkthrough; the file content is not evaluated by the workflow. Alternatively, use your own valid PDFs.
 
-### Create the stage users
+### Use the seeded stage accounts
 
-In **User Management**, use **Add user** to create one active, verified account for each row. Admin-created accounts are verified immediately. Give each a unique email at a domain such as `procurement.local`, the designation shown below, and the same temporary test password for convenience: `StageWalk!4826a`. If the form rejects that password, choose a different password that is at least 8 characters and not based on the user's name or email. Record the password locally so you can sign in as each person. Vendors are not user accounts.
+These active, verified accounts are created by `seed_initial_data` when the backend starts with `DEBUG=true`. No manual account creation is needed. All stage accounts use password `StageWalk!4826a`.
 
-| Stage role | Example name | Designation to enter | Suggested email |
+| Stage role | Account name | Designation | Email |
 | --- | --- | --- | --- |
 | TSC | TSC Reviewer | `TSC Member` | `tsc.a@procurement.local` |
 | AS (IA) | AS IA Reviewer | `AS IA` | `as.ia.a@procurement.local` |
@@ -54,6 +64,14 @@ In **User Management**, use **Add user** to create one active, verified account 
 | TAC | TAC Member | `TAC Member` | `tac.a@procurement.local` |
 | User representative | User Representative | `User Representative` | `user.rep.a@procurement.local` |
 | IFD/CFA | IFD CFA Approver | `IFD CFA` | `ifd.cfa.a@procurement.local` |
+
+If the stack was already running when this code was added, run the seed command once from the repository root:
+
+```sh
+docker compose exec backend python manage.py seed_initial_data
+```
+
+Then sign in as admin and confirm the accounts appear in **User Management**. The seed command creates missing accounts without resetting existing accounts or project progress. This only runs in the local DEBUG setup. Vendors remain vendor records, not login accounts.
 
 For this test, use the project drawer's **Project team** section to assign each created stakeholder to the test project. This makes the project visible to each test login. Committee membership is still set up stage by stage below. You may instead add users to the project when forming each committee, but make sure the next stage's assignee can open the project before their turn.
 
@@ -72,6 +90,32 @@ The email is contact information only; no invitation or vendor login is sent. Re
 Use the project drawer's **Procurement workflow** panel. Only use the button shown for the current status. When a note prompt appears, add the sample note shown below. After each handoff, sign out and sign in as the next responsible stakeholder. Verify the stage label and activity timeline after every transition.
 
 **Permission note:** The current app allows administrators to perform every transition. Some formal setup transitions are admin-only even when a committee carries out the review. The table marks those explicitly. Use the named committee user to review, upload documents, or handle correspondence, then sign in as admin for the marked transition. This follows the current implementation and avoids mistaking an authorization error for a failed workflow.
+
+### Login handoff quick map
+
+After the current account clicks a workflow button, sign out and log in as the account in the **Next login** column. All stage accounts use `StageWalk!4826a`; the admin uses `admin@procurement.local` / `procurement-dev-2026`. The stage account email list is in section 2. The app does not switch users automatically.
+
+| Current status | Sign in as and do this | Next login |
+| --- | --- | --- |
+| Draft | **Admin:** Submit requirement. | TSC Reviewer (then Admin for TSC approval) |
+| TSC Approval | **TSC Reviewer:** Review and add recommendation. **Admin:** Click Approve TSC. | Admin |
+| Board Formation | **Admin:** Form TSC Board, then click Form board and submit TSC report. | TSC Reviewer |
+| TSC Report As IA | **TSC Reviewer:** Upload report and forward it. | AS IA Reviewer |
+| AS IA Approval | **AS IA Reviewer:** Approve. | DG SS Approver |
+| DG SS Approval | **DG SS Approver:** Record approval. | HQ Reviewer |
+| HQ Review | **HQ Reviewer:** Raise query. **TSC Reviewer:** Reply. **HQ Reviewer:** Forward. | CS SR Reviewer |
+| CS SR Review | **CS SR Reviewer:** Raise query. **TSC Reviewer:** Reply. **CS SR Reviewer:** Forward. | IA Reviewer |
+| Draft Tender IA | **IA Reviewer:** Upload draft and acknowledge/issue tender. | Admin |
+| Tender Issued | **Admin:** Open vendor response period. | Tender Committee Member |
+| Vendor Response | **Tender Committee Member:** Upload vendor response and record/reply to vendor correspondence. **Admin:** Close tender. | Admin |
+| Technical Bid Board | **Admin:** Form Technical Bid Opening Board, then click Form TEC. | SS Approver |
+| TEC Formation | **SS Approver:** Approve TEC formation. | TEC Member |
+| TEC Report | **TEC Member:** Upload report. **HQ Reviewer:** Raise report query. **TEC Member:** Reply and submit report. | Admin |
+| Price Bid Open | **Admin:** Open price bid. | TAC Member |
+| TAC Review | **TAC Member:** Record negotiation and accept tender. TAC must include the User Representative. | IFD CFA Approver |
+| IFD CFA Approval | **IFD CFA Approver:** Approve CFA. | Workflow complete |
+
+If you are just checking the stage without making a change, stay signed in as the current stakeholder. At each handoff, the expected status appears in the project drawer; use that status to confirm you are at the right point before switching accounts.
 
 | # | Project stage and owner | What to do and expected result |
 | --- | --- | --- |

@@ -108,16 +108,58 @@ class Command(BaseCommand):
                 )
             self.stdout.write(self.style.SUCCESS(f"Development account ready: {details['email']}"))
 
-        self.seed_demo_project(User, departments["PROC"])
-        self.seed_workflow_project(User, departments["PROC"])
+        # Ready-to-use accounts for the stage-by-stage manual procurement run.
+        # Like the other demo accounts, these are local DEBUG-only fixtures.
+        stage_password = "StageWalk!4826a"
+        stage_users = [
+            ("tsc.a@procurement.local", "TSC Reviewer", "TSC Member"),
+            ("as.ia.a@procurement.local", "AS IA Reviewer", "AS IA"),
+            ("dg.ss.a@procurement.local", "DG SS Approver", "DG SS"),
+            ("hq.a@procurement.local", "HQ Reviewer", "HQ"),
+            ("cs.sr.a@procurement.local", "CS SR Reviewer", "CS SR"),
+            ("ia.a@procurement.local", "IA Reviewer", "IA"),
+            ("tender.a@procurement.local", "Tender Committee Member", "Procurement Member"),
+            ("ss.a@procurement.local", "SS Approver", "SS"),
+            ("tec.a@procurement.local", "TEC Member", "TEC Member"),
+            ("tac.a@procurement.local", "TAC Member", "TAC Member"),
+            ("user.rep.a@procurement.local", "User Representative", "User Representative"),
+            ("ifd.cfa.a@procurement.local", "IFD CFA Approver", "IFD CFA"),
+        ]
+        verifier = User.objects.filter(is_superuser=True).first()
+        for stage_email, stage_name, designation in stage_users:
+            user, created = User.objects.get_or_create(
+                email=stage_email,
+                defaults={
+                    "name": stage_name,
+                    "designation": designation,
+                    "department": departments["PROC"],
+                    "is_active": True,
+                    "verification_status": "VERIFIED",
+                },
+            )
+            if created:
+                user.set_password(stage_password)
+                user.save()
+            UserRole.objects.get_or_create(user=user, role=roles["USER"])
+            UserVerification.objects.get_or_create(
+                user=user,
+                status="VERIFIED",
+                defaults={
+                    "verified_by": verifier,
+                    "remarks": "Seeded local manual workflow account",
+                },
+            )
+            self.stdout.write(self.style.SUCCESS(f"Manual workflow account ready: {stage_email}"))
 
-    def seed_demo_project(self, User, department):
+        self.seed_demo_project(User, departments["PROC"], stage_users)
+
+    def seed_demo_project(self, User, department, stage_users):
         """Create one realistic in-progress record for the manual review flow."""
         from django.core.files.base import ContentFile
         from apps.audit.models import AuditLog
         from apps.committees.models import Committee, CommitteeMember
         from apps.documents.models import Document, DocumentVersion
-        from apps.procurement.models import ProcurementProject, ProjectActivity, ProjectMember
+        from apps.procurement.models import ProcurementProject, ProjectActivity, ProjectMember, ProjectQuery, ProjectQueryReply
         from apps.vendors.models import ProjectVendor, Vendor, VendorCategory, VendorCategoryMapping
 
         creator = User.objects.get(email="demo.user@procurement.local")
@@ -143,10 +185,20 @@ class Command(BaseCommand):
             ("DOCUMENT_UPLOADED", "Uploaded initial requirements and technical specification."),
             ("PROJECT_SUBMITTED", "Submitted for procurement review."),
             ("FORWARDED", "Draft → TSC Approval. Requirement submitted."),
-            ("FORWARDED", "TSC approved; board formed and TSC report sent for AS (IA) perusal."),
-            ("COMMITTEE_FORMED", "Technical Evaluation Committee formed with procurement, clinical engineering, and administration representation."),
+            ("COMMITTEE_FORMED", "TSC Committee formed and members assigned."),
+            ("APPROVED", "TSC approved; board formed."),
+            ("COMMITTEE_FORMED", "TSC Board formed with assigned members."),
+            ("FORWARDED", "TSC report submitted for AS (IA) perusal."),
+            ("APPROVED", "AS (IA) reviewed and approved the TSC report."),
+            ("APPROVED", "DG/SS approval recorded."),
+            ("STATUS_CHANGED", "HQ query raised and answered; file forwarded for CS (SR) review."),
+            ("STATUS_CHANGED", "CS (SR) query raised and answered."),
+            ("FORWARDED", "TSC report forwarded to CS (SR), then draft tender sent to IA Wing."),
+            ("APPROVED", "IA acknowledged the draft tender and issued the tender."),
             ("VENDOR_ASSOCIATED", "Verified vendor associated: Aster Clinical Systems Pvt Ltd."),
-            ("FORWARDED", "TEC report submitted for review."),
+            ("DOCUMENT_UPLOADED", "Vendor technical response received by the committee."),
+            ("COMMITTEE_FORMED", "Technical Bid Opening Board formed."),
+            ("COMMITTEE_FORMED", "TEC formed after SS approval; TEC report preparation started."),
         ]
         # Fill in any missing entries if a prior seed run stopped midway.
         for event_type, message in trail:
@@ -158,26 +210,49 @@ class Command(BaseCommand):
             )
         document_activity = project.activities.filter(activity_type="DOCUMENT_UPLOADED").first()
 
-        committee, _ = Committee.objects.get_or_create(
-            project=project,
-            committee_name="Diagnostic Equipment Technical Evaluation Committee",
-            defaults={"formed_by": admin or creator},
-        )
-        CommitteeMember.objects.get_or_create(
-            committee=committee,
-            user=creator,
-            defaults={"designation": "Procurement Project Lead"},
-        )
-        CommitteeMember.objects.get_or_create(
-            committee=committee,
-            user=reviewer,
-            defaults={"designation": "Clinical Engineering Reviewer"},
-        )
-        if admin:
-            CommitteeMember.objects.get_or_create(
-                committee=committee,
-                user=admin,
-                defaults={"designation": "Committee Chair · Procurement"},
+        stage_committees = [
+            ("TSC Committee", ["tsc.a@procurement.local"]),
+            ("TSC Board", ["tsc.a@procurement.local"]),
+            ("AS IA Committee", ["as.ia.a@procurement.local"]),
+            ("DG SS Committee", ["dg.ss.a@procurement.local"]),
+            ("HQ Committee", ["hq.a@procurement.local"]),
+            ("CS SR Committee", ["cs.sr.a@procurement.local"]),
+            ("IA Wing Committee", ["ia.a@procurement.local"]),
+            ("Procurement Tender Committee", ["tender.a@procurement.local"]),
+            ("Technical Bid Opening Board", ["tender.a@procurement.local", "tec.a@procurement.local"]),
+            ("TEC", ["tec.a@procurement.local"]),
+            ("TAC", ["tac.a@procurement.local", "user.rep.a@procurement.local"]),
+            ("IFD CFA Committee", ["ifd.cfa.a@procurement.local"]),
+        ]
+        for committee_name, member_emails in stage_committees:
+            committee, created = Committee.objects.get_or_create(
+                project=project,
+                committee_name=committee_name,
+                defaults={"formed_by": admin or creator},
+            )
+            if created:
+                ProjectActivity.objects.get_or_create(
+                    project=project,
+                    activity_type="COMMITTEE_FORMED",
+                    message=f"Committee formed: {committee_name}.",
+                    defaults={"actor": admin or creator},
+                )
+            for member_email in member_emails:
+                member_user = User.objects.get(email=member_email)
+                CommitteeMember.objects.get_or_create(
+                    committee=committee,
+                    user=member_user,
+                    defaults={"designation": member_user.designation},
+                )
+
+        # Every local workflow login can open this seeded project. Stage actions
+        # still use the designation and committee checks in the workflow view.
+        stage_emails = [email for email, _, _ in stage_users]
+        for member_user in User.objects.filter(email__in=stage_emails):
+            ProjectMember.objects.get_or_create(
+                project=project,
+                user=member_user,
+                defaults={"assigned_by": admin or creator},
             )
 
         category, _ = VendorCategory.objects.get_or_create(
@@ -216,98 +291,82 @@ class Command(BaseCommand):
         elif document.activity_id is None and document_activity:
             document.activity = document_activity
             document.save(update_fields=["activity"])
-        if not document.versions.exists():
-            pdf = self.sample_pdf(project.project_code)
-            version = DocumentVersion.objects.create(
-                document=document,
-                version_number=1,
-                uploaded_by=creator,
-                storage_path=ContentFile(pdf, name="Diagnostic_Equipment_Requirements.pdf"),
-            )
-            document.file_size = len(pdf)
-            document.save(update_fields=["file_size"])
-            AuditLog.objects.create(
-                user=creator,
-                entity_type="document",
-                entity_id=str(document.id),
-                operation="DOCUMENT_UPLOADED",
-                new_values={"version": version.version_number, "name": document.document_name},
-            )
-
-        self.stdout.write(self.style.SUCCESS(f"Demo project ready: {project.project_code}"))
-
-    def seed_workflow_project(self, User, department):
-        """Create a clean Draft project for manually exercising every stage."""
-        from django.core.files.base import ContentFile
-        from apps.audit.models import AuditLog
-        from apps.documents.models import Document, DocumentVersion
-        from apps.procurement.models import ProcurementProject, ProjectActivity
-        from apps.vendors.models import ProjectVendor, Vendor
-
-        creator = User.objects.get(email="demo.user@procurement.local")
-        project, _ = ProcurementProject.objects.get_or_create(
-            title="Full Workflow Test — Diagnostic Imaging Equipment",
-            defaults={
-                "description": "A clean local test case. Progress this from Draft through submission, review, committee formation, committee review, and final approval.",
-                "department": department,
-                "created_by": creator,
-                "estimated_amount": "7200000.00",
-                "current_status": "DRAFT",
-            },
-        )
-        if not project.activities.exists():
-            ProjectActivity.objects.create(
-                project=project,
-                actor=creator,
-                activity_type="PROJECT_CREATED",
-                message="Clean full-workflow test project created in Draft.",
-            )
-        vendor = Vendor.objects.filter(vendor_name="Aster Clinical Systems Pvt Ltd").first()
-        if vendor:
-            ProjectVendor.objects.get_or_create(project=project, vendor=vendor)
-        document, _ = Document.objects.get_or_create(
-            project=project,
-            document_name="Workflow_Test_Specification.pdf",
-            defaults={
-                "activity": project.activities.filter(activity_type="PROJECT_CREATED").first(),
-                "uploaded_by": creator,
-                "document_type": "PDF",
-                "mime_type": "application/pdf",
-                "file_size": 0,
-            },
-        )
-        if not document.versions.exists():
-            pdf = self.sample_pdf(project.project_code)
-            version = DocumentVersion.objects.create(
-                document=document,
-                version_number=1,
-                uploaded_by=creator,
-                storage_path=ContentFile(pdf, name="Workflow_Test_Specification.pdf"),
-            )
+        seeded_documents = [
+            ("TSC_Committee_Report.pdf", "Uploaded TSC committee report for AS (IA) perusal."),
+            ("Draft_Tender.pdf", "Uploaded draft tender reviewed by IA Wing."),
+            ("Vendor_Technical_Response.pdf", "Vendor technical response received by the committee."),
+            ("TEC_Report_Draft.pdf", "TEC report preparation started."),
+        ]
+        for document_name, activity_message in [("Diagnostic_Equipment_Requirements.pdf", "Uploaded initial requirements and technical specification."), *seeded_documents]:
             activity, _ = ProjectActivity.objects.get_or_create(
                 project=project,
                 activity_type="DOCUMENT_UPLOADED",
-                message=f"Uploaded {document.document_name} (version {version.version_number}).",
+                message=activity_message,
                 defaults={"actor": creator},
             )
-            document.activity = activity
-            document.file_size = len(pdf)
-            document.save(update_fields=["activity", "file_size"])
-            AuditLog.objects.get_or_create(
-                entity_type="document",
-                entity_id=str(document.id),
-                operation="DOCUMENT_UPLOADED",
+            doc, _ = Document.objects.get_or_create(
+                project=project,
+                document_name=document_name,
                 defaults={
-                    "user": creator,
-                    "new_values": {"version": version.version_number, "name": document.document_name},
+                    "activity": activity,
+                    "uploaded_by": creator,
+                    "document_type": "PDF",
+                    "mime_type": "application/pdf",
+                    "file_size": 0,
                 },
             )
-        elif document.activity_id is None:
-            activity = project.activities.filter(activity_type="DOCUMENT_UPLOADED").first()
-            if activity:
-                document.activity = activity
-                document.save(update_fields=["activity"])
-        self.stdout.write(self.style.SUCCESS(f"Full workflow test project ready: {project.project_code} (status: {project.current_status})"))
+            if not doc.versions.exists():
+                pdf = self.sample_pdf(project.project_code)
+                version = DocumentVersion.objects.create(
+                    document=doc,
+                    version_number=1,
+                    uploaded_by=creator,
+                    storage_path=ContentFile(pdf, name=document_name),
+                )
+                doc.file_size = len(pdf)
+                doc.save(update_fields=["file_size"])
+                AuditLog.objects.create(
+                    user=creator,
+                    entity_type="document",
+                    entity_id=str(doc.id),
+                    operation="DOCUMENT_UPLOADED",
+                    new_values={"version": version.version_number, "name": document_name},
+                )
+
+        seeded_queries = [
+            ("HQ_REVIEW", "Confirm equipment compatibility", "Please confirm the requested interface standard.", "hq.a@procurement.local", "tsc.a@procurement.local", ""),
+            ("CS_SR_REVIEW", "Confirm service coverage", "Please confirm the proposed service period.", "cs.sr.a@procurement.local", "tsc.a@procurement.local", ""),
+            ("VENDOR_RESPONSE", "Clarify delivery schedule", "Please confirm the requested installation timeline.", "tender.a@procurement.local", "tender.a@procurement.local", ""),
+            ("TEC_REPORT", "Clarify evaluation criterion", "Please confirm the interpretation of criterion 4.", "hq.a@procurement.local", "tec.a@procurement.local", "TEC"),
+        ]
+        for stage, subject, body, raised_email, reply_email, target_designation in seeded_queries:
+            raised_by = User.objects.get(email=raised_email)
+            replied_by = User.objects.get(email=reply_email)
+            query, _ = ProjectQuery.objects.get_or_create(
+                project=project,
+                stage=stage,
+                subject=subject,
+                defaults={
+                    "body": body,
+                    "raised_by": raised_by,
+                    "target_designation": target_designation,
+                    "target_vendor": vendor if stage == "VENDOR_RESPONSE" else None,
+                    "status": "ANSWERED",
+                },
+            )
+            ProjectQueryReply.objects.get_or_create(
+                query=query,
+                actor=replied_by,
+                body="Confirmed. The requirement and evaluation record have been updated accordingly.",
+            )
+            ProjectActivity.objects.get_or_create(
+                project=project,
+                activity_type="STATUS_CHANGED",
+                message=f"Query raised and answered at {stage.replace('_', ' ')}: {subject}",
+                defaults={"actor": replied_by},
+            )
+
+        self.stdout.write(self.style.SUCCESS(f"Demo project ready: {project.project_code}"))
 
     @staticmethod
     def sample_pdf(project_code):

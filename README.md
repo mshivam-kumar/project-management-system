@@ -45,13 +45,15 @@ Other local development accounts use the password `procurement-demo-2026`:
 - Verified TSC reviewer: `reviewer@procurement.local`
 - Pending regular user: `pending.user@procurement.local` (cannot sign in until an admin verifies it)
 
+The local seed also creates active, verified accounts for every workflow stage. Their emails and shared password are listed in [MANUAL_TEST_GUIDE.md](MANUAL_TEST_GUIDE.md). All of these accounts are local DEBUG-only fixtures; vendors do not get accounts.
+
 These demo accounts are created only when Django `DEBUG` is enabled. Use either verified account to sign in immediately, or sign in as the admin and approve the pending user under **User Management**. Accounts and projects are seeded on backend startup. New stakeholder accounts are created by an administrator; vendors do not sign in. If the stack was running before you updated the repository, recreate the services so Compose applies the local media mount and the backend applies migrations and startup seeding:
 
 ```sh
 docker compose up --build -d
 ```
 
-The development seed creates two manual-test projects: **District Hospital Diagnostic Equipment Procurement** in **TEC Report**, with its populated committee, verified vendor, stage history, and sample PDF; and **Full Workflow Test — Diagnostic Imaging Equipment** in **Draft**, ready to move through every stage, with a sample PDF and verified vendor. It also creates the reviewer and regular-user accounts. Seed data is added if missing and does not reset project progress or overwrite local test records on backend restart.
+The development seed creates one populated reference project: **District Hospital Diagnostic Equipment Procurement** in **TEC Report**, with all stage accounts assigned, stage committees, a verified vendor, documents, answered query threads, and a stage history. The seed also creates regular and stage-specific accounts. To start with exactly this one project after an earlier test run, reset the local database with `docker compose down -v` before starting the stack. Uploaded files under `media/` remain. Seed data is otherwise added if missing and does not reset project progress or overwrite local test records on backend restart. Create another project manually to run the complete workflow from Draft.
 
 If the containers are already running and you want to add any missing seed records, run:
 
@@ -139,7 +141,7 @@ Each stage's committee handles its own work, then responsibility passes to the n
 1. Sign in as the seeded Super Admin (`admin@procurement.local` / `procurement-dev-2026`) and open the seeded in-progress project from the dashboard. All demo accounts use `procurement-demo-2026` as their password.
 2. Inspect its activity timeline, open **Committees** to see the committee and member assignments, and check the associated verified vendor in the project drawer.
 3. In the project drawer, click **View** beside `Diagnostic_Equipment_Requirements.pdf` to preview it in the browser. **Download** saves a copy; **New version** uploads another PDF and preserves the version history.
-4. Use **Procurement workflow** on the clean Draft project to follow the [stage-by-stage workflow above](#procurement-workflow-and-committee-handoffs). Set up each committee and its members before its stage takes responsibility. Raise stage queries and record replies; an unanswered query blocks advancement. See [USAGE_GUIDE.md](USAGE_GUIDE.md) and [MANUAL_TEST_GUIDE.md](MANUAL_TEST_GUIDE.md) for the full walkthrough.
+4. Create a second project in **Draft** and use **Procurement workflow** to follow the [stage-by-stage workflow above](#procurement-workflow-and-committee-handoffs). Assign the seeded stage accounts to the new project and form its committees as each stage begins. Raise queries and record replies; an unanswered query blocks advancement. See [USAGE_GUIDE.md](USAGE_GUIDE.md) and [MANUAL_TEST_GUIDE.md](MANUAL_TEST_GUIDE.md) for the full walkthrough.
 5. Sign out and sign in as `pending.user@procurement.local` / `procurement-demo-2026`; sign-in is blocked while the account is pending. Sign back in as the Super Admin, open **User Management**, and verify that account to try it.
 6. Admins manage stakeholder accounts and designations, assign verified users, associate verified vendor records, and create stage-specific committees. Vendors do not sign in; committee members upload received vendor documents and record vendor updates and query/reply history.
 7. Check **Notifications** and **Audit Logs** for recorded operations. The stage actions update the project status and append a dated activity; they are a development workflow for exercising the trail.
