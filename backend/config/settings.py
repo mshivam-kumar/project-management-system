@@ -23,7 +23,7 @@ DATABASES = {"default": {"ENGINE":"django.db.backends.postgresql", "NAME":os.get
 AUTH_USER_MODEL = "accounts.User"
 AUTH_PASSWORD_VALIDATORS = [{"NAME":"django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},{"NAME":"django.contrib.auth.password_validation.MinimumLengthValidator"},{"NAME":"django.contrib.auth.password_validation.CommonPasswordValidator"},{"NAME":"django.contrib.auth.password_validation.NumericPasswordValidator"}]
 LANGUAGE_CODE="en-us"; TIME_ZONE="Asia/Kolkata"; USE_I18N=True; USE_TZ=True
-STATIC_URL="static/"; MEDIA_ROOT=BASE_DIR/"media"; MEDIA_URL="/media/"; DEFAULT_AUTO_FIELD="django.db.models.BigAutoField"
+STATIC_URL="static/"; MEDIA_ROOT=Path(os.getenv("MEDIA_ROOT", str(BASE_DIR/"media"))); MEDIA_URL="/media/"; DEFAULT_AUTO_FIELD="django.db.models.BigAutoField"
 REST_FRAMEWORK={"DEFAULT_AUTHENTICATION_CLASSES":["apps.accounts.authentication.VerifiedJWTAuthentication"],"DEFAULT_PERMISSION_CLASSES":["rest_framework.permissions.IsAuthenticated"],"DEFAULT_FILTER_BACKENDS":["django_filters.rest_framework.DjangoFilterBackend","rest_framework.filters.SearchFilter","rest_framework.filters.OrderingFilter"],"DEFAULT_PAGINATION_CLASS":"rest_framework.pagination.PageNumberPagination","PAGE_SIZE":20}
 SIMPLE_JWT={"TOKEN_OBTAIN_SERIALIZER":"apps.accounts.serializers.VerifiedTokenObtainPairSerializer","ROTATE_REFRESH_TOKENS":True,"BLACKLIST_AFTER_ROTATION":True}
 CORS_ALLOWED_ORIGINS=os.getenv("CORS_ALLOWED_ORIGINS","http://localhost:5173,http://127.0.0.1:5173").split(",")

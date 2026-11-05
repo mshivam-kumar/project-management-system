@@ -1,10 +1,6 @@
 # Manual Functionality Test Guide
 
-Use this checklist to exercise the application through the browser. It includes a clean end-to-end workflow and a shorter check of the preloaded sample project.
-
-## 1. Start and confirm the application
-
-From the repository root:
+Use the clean seeded project to exercise the process in the browser. Start the stack from the repository root:
 
 ```sh
 docker compose up --build -d
@@ -12,83 +8,46 @@ docker compose ps
 docker compose logs --tail=100 backend
 ```
 
-Wait until the `backend` and `db` containers are healthy. The backend applies repository migrations and seeds the admin, demo users, and both demo projects. Check backend logs if startup does not complete. Open [http://localhost:5173/](http://localhost:5173/).
+Open [http://localhost:5173/](http://localhost:5173/). Wait for the backend and database to start and apply migrations.
 
-If the stack was already running when code changed, restart the backend to run its startup seed and restart frontend if the browser still shows the old UI:
+## 1. Verify accounts and access
 
-```sh
-docker compose restart backend frontend
-```
+- Sign in as `admin@procurement.local` / `procurement-dev-2026`.
+- Verify that **Full Workflow Test — Diagnostic Imaging Equipment** is Draft and has its sample PDF.
+- There is no vendor sign-in. Vendors are entries managed by admins; committee and project users handle all vendor communication and files.
+- `reviewer@procurement.local` / `procurement-demo-2026` is a TSC reviewer. Other seeded user password is `procurement-demo-2026`.
 
-You can also apply any missing seed records directly without restarting:
+## 2. Run the stage path
 
-```sh
-docker compose exec backend python manage.py seed_initial_data
-```
+Use the clean project in this order. Stage controls appear in the project drawer's **Procurement workflow** section. Add a note when prompted.
 
-Refresh the browser and sign out/in if you already had a session open.
+1. Admin opens the clean seeded project. In **Committees**, create **TSC** and assign `reviewer@procurement.local` as a TSC member.
+2. Admin submits the requirement, then records TSC approval. TSC committee must exist before approval is accepted.
+3. After approval, create a committee named **TSC Board** in **Committees**. Advance using **Form board and submit TSC report**; the board must exist before the stage can advance. The reviewer can perform the TSC report action using the `TSC` designation.
+4. Change or create accounts with designations `AS (IA)`, `DG`, `HQ`, `CS (SR)`, and `IA` in **User Management**. Verify them, then sign in as the corresponding user to perform their stage action. Admin may perform any stage while setting up a local walkthrough.
+5. At **HQ Review**, raise a query routed to `HQ`. Sign in as the HQ user, answer it, and then advance. Repeat at **CS (SR) Review** routed to `CS (SR)`. An open query blocks advancing.
+6. At **Draft Tender to IA**, upload the draft PDF; IA acknowledges correctness and issues the tender.
+7. Admin associates the verified Aster vendor with the project. At **Vendor Response**, a member of the procurement/tender committee uploads the response received from the vendor, selects the Aster vendor in the query panel, and records any vendor query and reply. No vendor account is used.
+8. Admin closes the response period. In **Committees**, form **Technical Bid Opening Board** before advancing that stage. Then create a **TEC** and assign a verified TEC member. SS approves TEC formation only after the TEC committee exists.
+9. Upload the TEC report. Raise and answer an HQ query if needed, then forward to price bid opening.
+10. Open the price bid, create a **TAC**, and assign a user representative (`User Representative`) plus TAC members. TAC acceptance is blocked until both the TAC and user representative are assigned. Record review/negotiation through stage queries and the activity trail; accept the tender.
+11. Have IFD or CFA approve to finish at **Approved**.
 
-## 2. Verify the accounts and permissions
+Stage actions require the matching designation or committee membership. Admin and Super Admin can perform all actions for a manual demonstration. Uploads, stage changes, and discussion are recorded in the activity timeline. Uploaded PDFs are stored in the repository-root `media/` folder.
 
-1. On a fresh local database, sign in as `pending.user@procurement.local` with `procurement-demo-2026`. Expected: sign-in is refused because the account is pending. If you already verified this seeded account, register a different account from the sign-in page and use that new account for the pending-to-verified check.
-2. Sign in as `admin@procurement.local` with `procurement-dev-2026`.
-3. Open **User Management**, find the pending demo user, and verify it.
-4. Sign out and sign in as the pending account again. Expected: the account can now sign in.
-5. Sign in as `demo.user@procurement.local` with `procurement-demo-2026`. Expected: the user can create projects but does not see admin navigation or project stage controls.
+## 3. Check documents and query history
 
-## 3. Create a project and progress every stage
+- In each project drawer, open **Documents**, click **View**, then **Download**.
+- Upload a revised PDF with **New version** and confirm the version number increments.
+- Check query status and replies in **Stage queries and replies**. The next stage remains blocked while a query is unanswered.
+- The administrator can review recorded actions in **Audit Logs**.
 
-Use the seeded **Full Workflow Test — Diagnostic Imaging Equipment** project. It starts in Draft with a sample PDF and a verified vendor. No separate project setup is needed.
+## 4. Existing sample project and reset
 
-1. Sign in as `admin@procurement.local`.
-2. Find **Full Workflow Test — Diagnostic Imaging Equipment** in the dashboard and click its eye icon. Confirm its status is **Draft** and the activity timeline contains project creation.
-3. In the project drawer, open **Stage actions** and click **Submit**. Enter a note such as `Manual test submission`. Expected: status becomes **Submitted** and the note appears in the timeline.
-4. Click **Forward** and enter a review note. Expected: **Under Review**.
-5. Click **Forward** again. Expected: **Committee Formation**.
-6. Open **Committees** in the left navigation. Form a committee for this project, such as **Manual Test Technical Committee**. Select its row and add `reviewer@procurement.local` as a member. Expected: the reviewer appears in the committee member list.
-7. Sign out and sign in as `reviewer@procurement.local`. Expected: the project now appears on the reviewer dashboard, and its drawer, timeline, and documents are accessible without a separate project-team assignment. Sign in as an unrelated regular account (or register and verify another account) to confirm that account cannot see or open this project.
-8. Sign back in as the admin. Return to the project drawer and click **Forward**. Expected: **Committee Review**.
-9. Click **Forward** again. Expected: **Pending Approval**.
-10. Click **Approve** and add a decision note. Expected: **Approved**, with the final stage change visible in the activity timeline. This completes the happy-path workflow.
+**District Hospital Diagnostic Equipment Procurement** is an in-progress sample with committee, vendor, and a requirements PDF. Use the clean Draft project for a fresh walkthrough. The seed command does not reset existing projects. `docker compose down -v` erases the local database and test progress, but uploaded files remain in the repository-root `media/` folder.
 
-## 4. Exercise return and rejection paths
+## Troubleshooting
 
-Create separate projects for these paths because Approved and Rejected are final statuses. If the seeded Draft project has already been progressed, create a new Draft project as the demo user and use that instead.
-
-- **Return path:** progress a project to Under Review, click **Return**, then confirm its status is **Returned**. Click **Submit** to send it back to Submitted and continue forwarding it.
-- **Reject path:** progress another project to Pending Approval, click **Reject**, and confirm its status is **Rejected**.
-
-Each action should include its optional note in the project timeline and have a corresponding entry in **Audit Logs**.
-
-## 5. Upload, view, and version a document
-
-1. Open any accessible project drawer.
-2. Use the paperclip control near the message box to upload a valid PDF under 10 MB.
-3. Confirm the document appears under **Documents** and the timeline says it was uploaded.
-4. Click **View**. Expected: the PDF opens in an in-app preview. Close the preview and click **Download** to save it.
-5. Click **New version** and upload another PDF. Expected: the listed document version increments (for example, v1 to v2), and the timeline records the update.
-
-The seeded **District Hospital Diagnostic Equipment Procurement** project already includes `Diagnostic_Equipment_Requirements.pdf`; the full-workflow Draft project includes `Workflow_Test_Specification.pdf` for the preview check.
-
-## 6. Check the seeded sample project
-
-As Super Admin, open **District Hospital Diagnostic Equipment Procurement**. It starts at **Committee Review**, so it is a quick check rather than a clean run from Draft. Confirm:
-
-- The timeline shows earlier submission, review, committee formation, and vendor association events.
-- **Committees** shows the Technical Evaluation Committee and three members.
-- The project drawer lists the verified medical equipment vendor.
-- The sample requirements PDF previews and downloads.
-- **Forward** moves it to Pending Approval; then test Approve, Return, or Reject.
-
-The seed creates this project once. Restarting the backend does not reset project status or erase test changes. For a fresh full path, create a new project as the demo user. `docker compose down -v` deletes the local database and all local test records and uploaded documents.
-
-## Troubleshooting: I cannot see or use Stage actions
-
-- Stage actions are only shown to accounts with ADMIN or SUPER_ADMIN roles. Sign in as `admin@procurement.local`; the verified demo user is a regular user.
-- A regular account sees a project if it created the project, was assigned to the project, or is a member of one of its committees. Adding someone to a committee grants access to that project automatically.
-- Open the project with its eye icon. The action controls are inside the project details drawer under **Stage actions**.
-- Check the status. The controls change by status: Draft has Submit; Submitted through Committee Review have Forward, Return, and Reject; Pending Approval has Approve, Return, and Reject; terminal statuses have no actions.
-- If the project is not in the expected state, reload the page and open it again. The status should match the latest action.
-- Restart services after updating code with `docker compose restart backend frontend`, then refresh the browser. Check `docker compose logs --tail=100 backend` for startup or request errors.
-- A workflow action is not allowed if it does not match the current status. For a complete sequence, create a new Draft project instead of starting with the seeded Committee Review project.
-
+- A project is visible only to its creator, assigned members, committee members, and administrators. Vendors have no system accounts or access.
+- If a stage action is rejected, check the signed-in user's designation, the committee name/member designation where relevant, and unanswered queries.
+- After updating code, rebuild/restart with `docker compose up --build -d` and inspect `docker compose logs --tail=100 backend`.

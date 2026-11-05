@@ -59,6 +59,10 @@ class Command(BaseCommand):
         if not settings.DEBUG:
             return
 
+        # Earlier demo seeds included a vendor login. Vendors are records only;
+        # keep any account created by that seed disabled on upgraded databases.
+        User.objects.filter(email="vendor.rep@procurement.local").update(is_active=False, verification_status="REJECTED")
+
         demo_password = "procurement-demo-2026"
         demo_users = [
             {
@@ -76,6 +80,7 @@ class Command(BaseCommand):
             {
                 "email": "reviewer@procurement.local",
                 "name": "Clinical Engineering Reviewer",
+                "designation": "TSC Member",
                 "status": "VERIFIED",
                 "is_active": True,
             },
@@ -85,6 +90,7 @@ class Command(BaseCommand):
                 email=details["email"],
                 defaults={
                     "name": details["name"],
+                    "designation": details.get("designation", ""),
                     "department": departments["IT"],
                     "is_active": details["is_active"],
                     "verification_status": details["status"],
@@ -124,7 +130,7 @@ class Command(BaseCommand):
                 "department": department,
                 "created_by": creator,
                 "estimated_amount": "18500000.00",
-                "current_status": "COMMITTEE_REVIEW",
+                "current_status": "TEC_REPORT",
             },
         )
         ProjectMember.objects.get_or_create(project=project, user=creator, defaults={"assigned_by": admin})
@@ -136,12 +142,11 @@ class Command(BaseCommand):
             ("PROJECT_CREATED", "Project created with scope, budget estimate, and procurement department."),
             ("DOCUMENT_UPLOADED", "Uploaded initial requirements and technical specification."),
             ("PROJECT_SUBMITTED", "Submitted for procurement review."),
-            ("FORWARDED", "Draft → Submitted. Initial submission received."),
-            ("FORWARDED", "Submitted → Under Review. Completeness and budget checks started."),
-            ("FORWARDED", "Under Review → Committee Formation. Review passed; evaluation committee requested."),
+            ("FORWARDED", "Draft → TSC Approval. Requirement submitted."),
+            ("FORWARDED", "TSC approved; board formed and TSC report sent for AS (IA) perusal."),
             ("COMMITTEE_FORMED", "Technical Evaluation Committee formed with procurement, clinical engineering, and administration representation."),
             ("VENDOR_ASSOCIATED", "Verified vendor associated: Aster Clinical Systems Pvt Ltd."),
-            ("FORWARDED", "Committee Formation → Committee Review. Evaluation pack circulated to members."),
+            ("FORWARDED", "TEC report submitted for review."),
         ]
         # Fill in any missing entries if a prior seed run stopped midway.
         for event_type, message in trail:

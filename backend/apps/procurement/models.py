@@ -4,7 +4,7 @@ from django.db import models, connection, transaction
 from django.db.models import Max
 from django.utils import timezone
 class ProjectStatus(models.TextChoices):
-    DRAFT="DRAFT"; SUBMITTED="SUBMITTED"; UNDER_REVIEW="UNDER_REVIEW"; COMMITTEE_FORMATION="COMMITTEE_FORMATION"; COMMITTEE_REVIEW="COMMITTEE_REVIEW"; PENDING_APPROVAL="PENDING_APPROVAL"; APPROVED="APPROVED"; RETURNED="RETURNED"; REJECTED="REJECTED"; CANCELLED="CANCELLED"
+    DRAFT="DRAFT"; TSC_APPROVAL="TSC_APPROVAL"; BOARD_FORMATION="BOARD_FORMATION"; TSC_REPORT_AS_IA="TSC_REPORT_AS_IA"; AS_IA_APPROVAL="AS_IA_APPROVAL"; DG_SS_APPROVAL="DG_SS_APPROVAL"; HQ_REVIEW="HQ_REVIEW"; CS_SR_REVIEW="CS_SR_REVIEW"; DRAFT_TENDER_IA="DRAFT_TENDER_IA"; TENDER_ISSUED="TENDER_ISSUED"; VENDOR_RESPONSE="VENDOR_RESPONSE"; TECH_BID_BOARD="TECH_BID_BOARD"; TEC_FORMATION="TEC_FORMATION"; TEC_REPORT="TEC_REPORT"; PRICE_BID_OPEN="PRICE_BID_OPEN"; TAC_REVIEW="TAC_REVIEW"; IFD_CFA_APPROVAL="IFD_CFA_APPROVAL"; APPROVED="APPROVED"; RETURNED="RETURNED"; REJECTED="REJECTED"; CANCELLED="CANCELLED"
 class ProcurementProject(models.Model):
     id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
     project_code=models.CharField(max_length=20,unique=True,editable=False); title=models.CharField(max_length=240); description=models.TextField(blank=True)
@@ -53,3 +53,25 @@ class ProjectMember(models.Model):
     assigned_at=models.DateTimeField(auto_now_add=True)
     class Meta:
         constraints=[models.UniqueConstraint(fields=["project","user"],name="unique_project_member")]
+
+class ProjectQuery(models.Model):
+    class Status(models.TextChoices): OPEN="OPEN"; ANSWERED="ANSWERED"; CLOSED="CLOSED"
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    project=models.ForeignKey(ProcurementProject,on_delete=models.CASCADE,related_name="queries")
+    stage=models.CharField(max_length=40)
+    subject=models.CharField(max_length=240)
+    body=models.TextField()
+    raised_by=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="raised_project_queries")
+    target_designation=models.CharField(max_length=80,blank=True)
+    target_vendor=models.ForeignKey("vendors.Vendor",null=True,blank=True,on_delete=models.PROTECT,related_name="project_queries")
+    status=models.CharField(max_length=16,choices=Status.choices,default=Status.OPEN)
+    created_at=models.DateTimeField(auto_now_add=True)
+    class Meta: ordering=["created_at"]
+
+class ProjectQueryReply(models.Model):
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    query=models.ForeignKey(ProjectQuery,on_delete=models.CASCADE,related_name="replies")
+    actor=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
+    body=models.TextField()
+    created_at=models.DateTimeField(auto_now_add=True)
+    class Meta: ordering=["created_at"]

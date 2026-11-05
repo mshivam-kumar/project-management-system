@@ -1,57 +1,56 @@
 # How to Use the Procurement Project Management System
 
-This guide covers the local development application. Start the services from the repository root with `docker compose up --build`, then open [http://localhost:5173/](http://localhost:5173/). See [README.md](README.md) for prerequisites and service URLs.
+Start the local stack with `docker compose up --build` from the repository root, then open [http://localhost:5173/](http://localhost:5173/). The backend is at [http://localhost:8000/api/](http://localhost:8000/api/). See [README.md](README.md) for initial setup.
 
-## Sign in
+## Local accounts
 
-Use one of the development accounts below. The regular user accounts share the same password.
+These accounts are created only when `DEBUG=True`:
 
-| Account | Email | Password | Use |
+| Account | Email | Password | Purpose |
 | --- | --- | --- | --- |
-| Super Admin | `admin@procurement.local` | `procurement-dev-2026` | Manage users, departments, vendors, committees, and project stages |
-| Project user | `demo.user@procurement.local` | `procurement-demo-2026` | Create projects, post messages, and upload project documents |
-| Committee reviewer | `reviewer@procurement.local` | `procurement-demo-2026` | Join projects and committees as a reviewer |
-| Pending user | `pending.user@procurement.local` | `procurement-demo-2026` | Try sign-in before and after administrator verification |
+| Super Admin | `admin@procurement.local` | `procurement-dev-2026` | Manage users, vendors, committees, projects, and all stages |
+| Project user | `demo.user@procurement.local` | `procurement-demo-2026` | View assigned work and upload documents |
+| TSC reviewer | `reviewer@procurement.local` | `procurement-demo-2026` | TSC committee participation |
+| Pending user | `pending.user@procurement.local` | `procurement-demo-2026` | Try the account verification flow |
 
-The pending user cannot sign in until an admin verifies the account from **User Management**. These accounts are created only in development mode (`DEBUG=True`).
+Administrators create all system accounts in **User Management** and set each user's designation (for example, `TSC`, `AS (IA)`, `DG`, `SS`, `HQ`, `CS (SR)`, `IA`, `TEC`, `TAC`, `IFD`, or `CFA`). Vendors are records only and never sign in. Admins add vendors in **Vendor Management**, verify them, then attach the verified vendors to projects. Internal committee members record vendor correspondence, responses, and queries in the project.
 
-## Work with projects
+## Create and staff a project
 
-1. Sign in with a verified account and open **Dashboard** or **Projects**.
-2. Click **New project**, enter a title, department, estimated amount, and description, then create it. New projects start in **Draft**.
-3. Select the eye icon in the project row to open its details drawer.
-4. Use the drawer to read the activity timeline, send a message, upload a PDF, assign project members (admin only), and associate verified vendors.
-5. To view a PDF, use **View** in the Documents list. **Download** saves a copy. **New version** uploads a replacement as the next version of the same document.
+Only ADMIN or SUPER_ADMIN accounts can create a procurement project. Create users and departments first, then create the project from **Dashboard**. Open it with the eye button to review its timeline, upload PDFs, assign project members, and associate verified vendors. A project appears to its creator, assigned members, committee members, and administrators. Vendors do not have accounts or project access.
 
-PDF uploads must be valid PDFs smaller than 10 MB.
+Admins create committees in **Committees**: choose the project, enter a name containing its function (such as TSC, TEC, or TAC), form it, then assign active, verified users with the member designation. For example, assign the user representative to the TAC using the designation `User Representative`.
 
-## Manage committees
+## Follow the procurement stages
 
-Admins open **Committees** from the left navigation. Select a project, enter a committee name, and click **Form**. Select the committee row to see its members and assign active, verified users. The sample `reviewer@procurement.local` account is available for this.
+Open a project drawer and use **Procurement workflow**. Each successful stage change is recorded in the activity timeline and audit history. The API checks the user's designation or membership in the committee responsible for that stage; admins can manage any stage.
 
-Once added to a committee, a user can see that project on their dashboard and open its activity, messages, and documents. They do not need a separate project-team assignment. Users who are not project creators, assigned project members, committee members, or admins cannot see the project.
+| Stage | Action and next stage |
+| --- | --- |
+| Requirement / Draft | Admin creates project; **Submit** → TSC Approval |
+| TSC Approval | Form a TSC committee, then admin records approval; **Approve** → Board Formation |
+| Board Formation | Form a board committee, then submit the TSC report → TSC Report for AS (IA) |
+| TSC Report for AS (IA) | TSC **Forward** → AS (IA) Approval |
+| AS (IA) Approval | AS/IA **Approve** → DG/SS Approval |
+| DG/SS Approval | DG or SS **Approve** → HQ Review |
+| HQ Review | HQ asks/answers queries, then **Forward** → CS (SR) Review |
+| CS (SR) Review | CS/SR handles queries, then **Forward** → Draft Tender to IA |
+| Draft Tender to IA | IA checks correctness and **Acknowledges** → Tender Issued |
+| Tender Issued | Admin opens response period → Vendor Response |
+| Vendor Response | The responsible committee uploads vendor response PDFs and records vendor updates against the selected verified vendor; **Close Tender** → Technical Bid Board |
+| Technical Bid Board | Form a technical bid opening board → TEC Formation |
+| TEC Formation | Form the TEC committee; SS approves formation → TEC Report |
+| TEC Report | TEC submits its report; HQ queries are answered; **Forward** → Price Bid Open |
+| Price Bid Open | Admin opens the price bid → TAC Review |
+| TAC Review | Form TAC and assign a `User Representative`; then TAC reviews, negotiates with vendor, and records decision; **Accept Tender** → IFD/CFA Approval |
+| IFD/CFA Approval | IFD/CFA **Approve** → Approved |
 
-The seeded **District Hospital Diagnostic Equipment Procurement** project already has a Technical Evaluation Committee with three members. Its row appears in **Committees** after the development seed has run. A separate **Full Workflow Test — Diagnostic Imaging Equipment** project starts at Draft so you can run the complete workflow yourself.
+The workflow area supports stage queries. Enter a subject, message, and the recipient's designation (for example `HQ` or `CS (SR)`). Project participants can associate a query with a verified vendor already attached to the project. The designated internal user or project committee replies on that query; vendor correspondence is recorded by the committee. Unanswered queries prevent advancing the project.
 
-## Advance a project through stages
+## Documents and records
 
-Only ADMIN and SUPER_ADMIN users can advance stages. Open the project with the eye icon and use **Stage actions** in its details drawer. Each action asks for an optional note and adds a dated entry to the activity timeline and audit log.
+Upload valid PDF files up to 10 MB from the drawer's paperclip control. Compose stores them in the repository-root `media/` directory, mounted into the backend container and ignored by Git. Use **View** for the in-app preview, **Download** to save the PDF, and **New version** to upload a revision. The activity timeline records document changes. Messages and stage queries provide the project discussion trail.
 
-| Current status | Available action | Result |
-| --- | --- | --- |
-| Draft | Submit | Submitted |
-| Returned | Submit | Submitted |
-| Submitted | Forward | Under Review |
-| Under Review | Forward | Committee Formation |
-| Committee Formation | Forward | Committee Review |
-| Committee Review | Forward | Pending Approval |
-| Pending Approval | Approve | Approved |
-| Submitted through Pending Approval | Return | Returned |
-| Submitted through Pending Approval | Reject | Rejected |
+## Sample data
 
-To complete committee work, move the project to **Committee Formation**, form the committee and assign members in **Committees**, then return to the project drawer and click **Forward** to enter **Committee Review**.
-
-## Notifications and profile
-
-Open **Notifications** to see project assignments and document updates. Open your name in the top bar to change your password or view profile details. Sign out from the bottom of the left navigation.
-
+The local seed creates **District Hospital Diagnostic Equipment Procurement** as an in-progress sample and **Full Workflow Test — Diagnostic Imaging Equipment** as a clean Draft. It also creates a verified Aster vendor record that admins can associate with a project. Seed data runs on startup and can be refreshed with `docker compose exec backend python manage.py seed_initial_data`; this does not reset stage progress or test changes.

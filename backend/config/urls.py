@@ -5,7 +5,7 @@ import os
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from apps.accounts.views import UserViewSet, RegisterView, MeView
+from apps.accounts.views import UserViewSet, MeView
 from apps.departments.views import DepartmentViewSet
 from apps.procurement.views import ProjectViewSet, DashboardSummaryView
 from apps.vendors.views import VendorViewSet, VendorCategoryViewSet
@@ -31,4 +31,4 @@ def home(request):
     )
     return HttpResponse(page)
 
-urlpatterns = [path("", home, name="home"), path("admin/", admin.site.urls), path("api/v1/auth/login/", TokenObtainPairView.as_view()), path("api/v1/auth/refresh/", TokenRefreshView.as_view()), path("api/v1/auth/register/", RegisterView.as_view()), path("api/v1/auth/me/", MeView.as_view()), path("api/v1/auth/logout/", LogoutView.as_view()), path("api/v1/auth/password-change/", PasswordChangeView.as_view()), path("api/v1/dashboard/summary/", DashboardSummaryView.as_view()), path("api/v1/", include(router.urls))]
+urlpatterns = [path("", home, name="home"), path("admin/", admin.site.urls), path("api/v1/auth/login/", TokenObtainPairView.as_view()), path("api/v1/auth/refresh/", TokenRefreshView.as_view()), path("api/v1/auth/me/", MeView.as_view()), path("api/v1/auth/logout/", LogoutView.as_view()), path("api/v1/auth/password-change/", PasswordChangeView.as_view()), path("api/v1/dashboard/summary/", DashboardSummaryView.as_view()), path("api/v1/", include(router.urls))]

@@ -25,8 +25,11 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@procurement.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-procurement-dev-2026}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Procurement Admin}
-    volumes: [./backend:/app]
-    ports: ["8000:8000"]
+      MEDIA_ROOT: /app/media
+    volumes:
+      - ./backend:/app
+      - ./media:/app/media
+    ports: ["127.0.0.1:8000:8000"]
     depends_on:
       db: {condition: service_healthy}
     healthcheck:
@@ -42,7 +45,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000/api/v1
     volumes: [./frontend:/app, frontend_node_modules:/app/node_modules]
-    ports: ["5173:5173"]
+    ports: ["127.0.0.1:5173:5173"]
     depends_on:
       backend: {condition: service_healthy}
 volumes:

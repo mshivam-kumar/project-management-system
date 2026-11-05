@@ -1,8 +1,9 @@
 from django.db import models, transaction
+import re
 from django.http import FileResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError, PermissionDenied
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -12,7 +13,7 @@ from apps.audit.models import AuditLog
 from apps.documents.models import Document, DocumentVersion
 from apps.vendors.models import Vendor, ProjectVendor
 from apps.notifications.models import Notification
-from .models import ProcurementProject, ProjectActivity, ProjectMessage, ProjectMember
+from .models import ProcurementProject, ProjectActivity, ProjectMessage, ProjectMember, ProjectQuery, ProjectQueryReply
 from .serializers import ProjectSerializer, ActivitySerializer, MessageSerializer, ProjectMemberSerializer
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -35,12 +36,16 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self,serializer):
+        if not has_any_role(self.request.user,"ADMIN","SUPER_ADMIN"):
+            raise PermissionDenied("Only an administrator can create procurement projects.")
         project=serializer.save(created_by=self.request.user)
         ProjectActivity.objects.create(project=project,actor=self.request.user,activity_type="PROJECT_CREATED",message="Project created")
         AuditLog.objects.create(user=self.request.user,entity_type="project",entity_id=str(project.id),operation="CREATE",new_values={"project_code":project.project_code,"title":project.title})
 
     @transaction.atomic
     def perform_update(self,serializer):
+        if not has_any_role(self.request.user,"ADMIN","SUPER_ADMIN"):
+            raise PermissionDenied("Only an administrator can change project details.")
         instance=serializer.instance; old={"title":instance.title,"description":instance.description,"department":str(instance.department_id),"estimated_amount":str(instance.estimated_amount)}
         project=serializer.save()
         ProjectActivity.objects.create(project=project,actor=self.request.user,activity_type="PROJECT_UPDATED",message="Project details updated")
@@ -71,7 +76,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         uploaded=request.FILES.get("file")
         if not uploaded: raise ValidationError({"file":"PDF file is required."})
         if uploaded.size>10*1024*1024: raise ValidationError({"file":"Maximum file size is 10 MB."})
-        if uploaded.content_type!="application/pdf" or not uploaded.name.lower().endswith(".pdf"):
+        if not uploaded.name.lower().endswith(".pdf"):
             raise ValidationError({"file":"Only PDF files are accepted."})
         if uploaded.read(5)!=b"%PDF-": raise ValidationError({"file":"The uploaded file is not a valid PDF."})
         uploaded.seek(0)
@@ -105,43 +110,102 @@ class ProjectViewSet(viewsets.ModelViewSet):
         response["Content-Disposition"]=f'inline; filename="{document.document_name}"'
         return response
 
-    @action(detail=True,methods=["post"],permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin],url_path="workflow-action")
+    @action(detail=True,methods=["post"],url_path="workflow-action")
     @transaction.atomic
     def workflow_action(self,request,pk=None):
         project=self.get_object()
         action_name=(request.data.get("action") or "").upper()
         remarks=(request.data.get("remarks") or "").strip()
         transitions={
-            ("DRAFT","SUBMIT"):"SUBMITTED",
-            ("RETURNED","SUBMIT"):"SUBMITTED",
-            ("SUBMITTED","FORWARD"):"UNDER_REVIEW",
-            ("UNDER_REVIEW","FORWARD"):"COMMITTEE_FORMATION",
-            ("COMMITTEE_FORMATION","FORWARD"):"COMMITTEE_REVIEW",
-            ("COMMITTEE_REVIEW","FORWARD"):"PENDING_APPROVAL",
-            ("PENDING_APPROVAL","APPROVE"):"APPROVED",
-            ("SUBMITTED","RETURN"):"RETURNED",
-            ("UNDER_REVIEW","RETURN"):"RETURNED",
-            ("COMMITTEE_FORMATION","RETURN"):"RETURNED",
-            ("COMMITTEE_REVIEW","RETURN"):"RETURNED",
-            ("PENDING_APPROVAL","RETURN"):"RETURNED",
-            ("SUBMITTED","REJECT"):"REJECTED",
-            ("UNDER_REVIEW","REJECT"):"REJECTED",
-            ("COMMITTEE_FORMATION","REJECT"):"REJECTED",
-            ("COMMITTEE_REVIEW","REJECT"):"REJECTED",
-            ("PENDING_APPROVAL","REJECT"):"REJECTED",
+            ("DRAFT","SUBMIT"):"TSC_APPROVAL",("RETURNED","RESUBMIT"):"TSC_APPROVAL",
+            ("TSC_APPROVAL","APPROVE"):"BOARD_FORMATION",("BOARD_FORMATION","FORM_BOARD"):"TSC_REPORT_AS_IA",
+            ("TSC_REPORT_AS_IA","FORWARD"):"AS_IA_APPROVAL",("AS_IA_APPROVAL","APPROVE"):"DG_SS_APPROVAL",
+            ("DG_SS_APPROVAL","APPROVE"):"HQ_REVIEW",("HQ_REVIEW","FORWARD"):"CS_SR_REVIEW",
+            ("CS_SR_REVIEW","FORWARD"):"DRAFT_TENDER_IA",("DRAFT_TENDER_IA","ACKNOWLEDGE"):"TENDER_ISSUED",
+            ("TENDER_ISSUED","OPEN_RESPONSES"):"VENDOR_RESPONSE",("VENDOR_RESPONSE","CLOSE_TENDER"):"TECH_BID_BOARD",
+            ("TECH_BID_BOARD","FORM_BOARD"):"TEC_FORMATION",("TEC_FORMATION","APPROVE"):"TEC_REPORT",
+            ("TEC_REPORT","FORWARD"):"PRICE_BID_OPEN",("PRICE_BID_OPEN","OPEN_PRICE_BID"):"TAC_REVIEW",
+            ("TAC_REVIEW","ACCEPT_TENDER"):"IFD_CFA_APPROVAL",("IFD_CFA_APPROVAL","APPROVE"):"APPROVED",
         }
         next_status=transitions.get((project.current_status,action_name))
         if not next_status:
             raise ValidationError({"action":f"{action_name or 'Choose an action'} is not available while project is {project.current_status}."})
+        if (project.current_status,action_name)==("TSC_APPROVAL","APPROVE") and not project.committees.filter(committee_name__icontains="TSC").exists():
+            raise ValidationError({"committee":"Form the TSC committee before recording its approval."})
+        if (project.current_status,action_name) in {("BOARD_FORMATION","FORM_BOARD"),("TECH_BID_BOARD","FORM_BOARD")} and not project.committees.filter(models.Q(committee_name__icontains="BOARD")|models.Q(committee_name__icontains="TECHNICAL")).exists():
+            raise ValidationError({"committee":"Form the required board in Committees before advancing."})
+        if (project.current_status,action_name)==("TEC_FORMATION","APPROVE") and not project.committees.filter(committee_name__icontains="TEC").exists():
+            raise ValidationError({"committee":"Form the TEC committee before approving its formation."})
+        if (project.current_status,action_name)==("TAC_REVIEW","ACCEPT_TENDER"):
+            tac=project.committees.filter(committee_name__icontains="TAC")
+            if not tac.exists(): raise ValidationError({"committee":"Form the TAC committee before accepting the tender."})
+            if not tac.filter(members__designation__iregex=r"user([ _-]+representative)?").exists():
+                raise ValidationError({"committee":"Assign a user representative to the TAC before accepting the tender."})
+        if ProjectQuery.objects.filter(project=project,status="OPEN").exists():
+            raise ValidationError({"queries":"Answer all open queries before advancing this stage."})
+        if not has_any_role(request.user,"ADMIN","SUPER_ADMIN"):
+            required={"TSC_APPROVAL":("ADMIN",),"BOARD_FORMATION":("ADMIN",),"TSC_REPORT_AS_IA":("TSC",),"AS_IA_APPROVAL":("AS","IA"),"DG_SS_APPROVAL":("DG","SS"),"HQ_REVIEW":("HQ",),"CS_SR_REVIEW":("CS","SR"),"DRAFT_TENDER_IA":("IA",),"TENDER_ISSUED":("IA",),"VENDOR_RESPONSE":("ADMIN",),"TECH_BID_BOARD":("ADMIN",),"TEC_FORMATION":("SS",),"TEC_REPORT":("TEC",),"PRICE_BID_OPEN":("ADMIN",),"TAC_REVIEW":("TAC","USER"),"IFD_CFA_APPROVAL":("IFD","CFA")}.get(project.current_status,())
+            designation_tokens=set(re.findall(r"[A-Z0-9]+",(request.user.designation or "").upper()))
+            has_designation=any(token in designation_tokens for token in required if token!="USER")
+            committee_keywords={"TSC_REPORT_AS_IA":("TSC",),"AS_IA_APPROVAL":("AS","IA"),"DG_SS_APPROVAL":("DG","SS"),"HQ_REVIEW":("HQ",),"CS_SR_REVIEW":("CS","SR"),"DRAFT_TENDER_IA":("IA",),"TENDER_ISSUED":("IA",),"VENDOR_RESPONSE":("PROCUREMENT","TENDER","VENDOR"),"TECH_BID_BOARD":("TECHNICAL","BOARD"),"TEC_REPORT":("TEC",),"TAC_REVIEW":("TAC",),"IFD_CFA_APPROVAL":("IFD","CFA")}.get(project.current_status,())
+            if committee_keywords:
+                committee_qs=project.committees.filter(members__user=request.user)
+                has_designation=has_designation or any(committee_qs.filter(committee_name__icontains=keyword).exists() for keyword in committee_keywords)
+            if not has_designation: raise PermissionDenied("Your account designation is not authorized to advance this stage.")
         previous=project.current_status
         project.current_status=next_status
         project.save(update_fields=["current_status","updated_at"])
-        activity_type={"SUBMIT":"PROJECT_SUBMITTED","FORWARD":"FORWARDED","APPROVE":"APPROVED","RETURN":"RETURNED","REJECT":"REJECTED"}[action_name]
+        activity_type={"SUBMIT":"PROJECT_SUBMITTED","RESUBMIT":"PROJECT_SUBMITTED","FORWARD":"FORWARDED","APPROVE":"APPROVED","ACKNOWLEDGE":"APPROVED","RETURN":"RETURNED","REJECT":"REJECTED"}.get(action_name,"STATUS_CHANGED")
         note=f"{previous.replace('_',' ').title()} → {next_status.replace('_',' ').title()}"
         if remarks: note=f"{note}. {remarks}"
         ProjectActivity.objects.create(project=project,actor=request.user,activity_type=activity_type,message=note)
         AuditLog.objects.create(user=request.user,entity_type="project",entity_id=str(project.id),operation=action_name,new_values={"status":next_status,"remarks":remarks})
         return Response({"current_status":next_status})
+
+    @action(detail=True,methods=["get","post"],url_path="queries")
+    @transaction.atomic
+    def queries(self,request,pk=None):
+        project=self.get_object()
+        if request.method=="POST":
+            subject=(request.data.get("subject") or "").strip(); body=(request.data.get("body") or "").strip()
+            if not subject or not body: raise ValidationError({"detail":"Subject and question are required."})
+            target_vendor=None
+            if request.data.get("target_vendor"):
+                if not has_any_role(request.user,"ADMIN","SUPER_ADMIN") and not project.committees.filter(members__user=request.user).exists():
+                    raise PermissionDenied("Only the project committee can record vendor correspondence.")
+                target_vendor=Vendor.objects.filter(id=request.data["target_vendor"],projectvendor__project=project,is_active=True,verification_status="VERIFIED").first()
+                if not target_vendor: raise ValidationError({"target_vendor":"Vendor is not associated with this project."})
+            query=ProjectQuery.objects.create(project=project,stage=project.current_status,subject=subject,body=body,raised_by=request.user,target_designation=(request.data.get("target_designation") or "").strip(),target_vendor=target_vendor)
+            ProjectActivity.objects.create(project=project,actor=request.user,activity_type="STATUS_CHANGED",message=f"Query raised at {project.current_status.replace('_',' ')}: {subject}")
+            AuditLog.objects.create(user=request.user,entity_type="project_query",entity_id=str(query.id),operation="CREATE",new_values={"project":str(project.id),"stage":query.stage,"subject":subject,"target_designation":query.target_designation,"target_vendor":str(target_vendor.id) if target_vendor else None})
+            return Response(self._query_data(query,request.user),status=201)
+        qs=project.queries.select_related("raised_by","target_vendor").prefetch_related("replies__actor")
+        return Response([self._query_data(q,request.user) for q in qs])
+
+    @staticmethod
+    def _query_data(query,user):
+        return {"id":str(query.id),"stage":query.stage,"subject":query.subject,"body":query.body,"status":query.status,"target_designation":query.target_designation,"target_vendor":str(query.target_vendor_id) if query.target_vendor_id else None,"raised_by":query.raised_by.name,"created_at":query.created_at,"replies":[{"id":str(r.id),"actor":r.actor.name,"body":r.body,"created_at":r.created_at} for r in query.replies.all()]}
+
+    @action(detail=True,methods=["post"],url_path=r"queries/(?P<query_id>[^/.]+)/reply")
+    @transaction.atomic
+    def reply_query(self,request,pk=None,query_id=None):
+        project=self.get_object(); query=project.queries.filter(id=query_id).select_related("target_vendor").first()
+        if not query: raise NotFound("Query not found")
+        designation_tokens=set(re.findall(r"[A-Z0-9]+",(request.user.designation or "").upper()))
+        target_tokens=set(re.findall(r"[A-Z0-9]+",(query.target_designation or "").upper()))
+        internal_committee=project.committees.filter(members__user=request.user).exists()
+        if query.target_vendor_id:
+            eligible=has_any_role(request.user,"ADMIN","SUPER_ADMIN") or internal_committee or (target_tokens and target_tokens.issubset(designation_tokens))
+        else:
+            eligible=has_any_role(request.user,"ADMIN","SUPER_ADMIN") or (target_tokens and target_tokens.issubset(designation_tokens)) or project.created_by_id==request.user.id or project.members.filter(user=request.user).exists() or internal_committee
+        if not eligible: raise PermissionDenied("This query is assigned to another stakeholder.")
+        body=(request.data.get("body") or "").strip()
+        if not body: raise ValidationError({"body":"Reply is required."})
+        reply=ProjectQueryReply.objects.create(query=query,actor=request.user,body=body)
+        query.status="ANSWERED"; query.save(update_fields=["status"])
+        ProjectActivity.objects.create(project=project,actor=request.user,activity_type="STATUS_CHANGED",message=f"Reply added to query: {query.subject}")
+        AuditLog.objects.create(user=request.user,entity_type="project_query",entity_id=str(query.id),operation="REPLY",new_values={"reply_id":str(reply.id)})
+        return Response({"id":str(reply.id),"actor":request.user.name,"body":reply.body,"created_at":reply.created_at},status=201)
 
     @action(detail=True,methods=["get","post"],permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin])
     @transaction.atomic
@@ -162,9 +226,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def vendors(self,request,pk=None):
         project=self.get_object()
         if request.method=="GET":
-            eligible=Vendor.objects.filter(is_active=True,verification_status="VERIFIED").values("id","vendor_name","registration_number")
-            associated=ProjectVendor.objects.filter(project=project).select_related("vendor")
+            eligible=Vendor.objects.filter(is_active=True,verification_status="VERIFIED").values("id","vendor_name","registration_number") if has_any_role(request.user,"ADMIN","SUPER_ADMIN") else Vendor.objects.none().values("id","vendor_name","registration_number")
+            associated=ProjectVendor.objects.filter(project=project,vendor__is_active=True,vendor__verification_status="VERIFIED").select_related("vendor")
             return Response({"eligible_vendors":list(eligible),"associated_vendors":[{"id":str(x.id),"vendor_id":str(x.vendor_id),"vendor_name":x.vendor.vendor_name,"participation_status":x.participation_status} for x in associated]})
+        if not has_any_role(request.user,"ADMIN","SUPER_ADMIN"): raise PermissionDenied("Only administrators may add vendors to a project.")
         try: vendor=Vendor.objects.get(id=request.data.get("vendor"),is_active=True,verification_status="VERIFIED")
         except Vendor.DoesNotExist: raise ValidationError({"vendor":"Choose an active, verified vendor."})
         link,created=ProjectVendor.objects.get_or_create(project=project,vendor=vendor)
@@ -193,7 +258,7 @@ class DashboardSummaryView(APIView):
             "total_projects":projects.count(),
             "active_projects":projects.exclude(current_status__in=["APPROVED","REJECTED","CANCELLED"]).count(),
             "approved_projects":projects.filter(current_status="APPROVED").count(),
-            "pending_actions":projects.filter(current_status__in=["SUBMITTED","UNDER_REVIEW","PENDING_APPROVAL"]).count(),
+            "pending_actions":projects.exclude(current_status__in=["DRAFT","APPROVED","REJECTED","CANCELLED"]).count(),
         }
         if admin:
             result.update({
