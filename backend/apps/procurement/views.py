@@ -16,6 +16,37 @@ from apps.notifications.models import Notification
 from .models import ProcurementProject, ProjectActivity, ProjectMessage, ProjectMember, ProjectQuery, ProjectQueryReply
 from .serializers import ProjectSerializer, ActivitySerializer, MessageSerializer, ProjectMemberSerializer
 
+STAGE_DESIGNATIONS={"TSC_REPORT_AS_IA":("TSC",),"AS_IA_APPROVAL":("AS","IA"),"DG_SS_APPROVAL":("DG","SS"),"HQ_REVIEW":("HQ",),"CS_SR_REVIEW":("CS","SR"),"DRAFT_TENDER_IA":("IA",),"TENDER_ISSUED":("IA",),"VENDOR_RESPONSE":("PROCUREMENT","TENDER","VENDOR"),"TECH_BID_BOARD":("TECHNICAL","BOARD"),"TEC_REPORT":("TEC",),"TAC_REVIEW":("TAC","USER"),"IFD_CFA_APPROVAL":("IFD","CFA")}
+STAGE_COMMITTEES={"TSC_REPORT_AS_IA":("TSC",),"AS_IA_APPROVAL":("AS","IA"),"DG_SS_APPROVAL":("DG","SS"),"HQ_REVIEW":("HQ",),"CS_SR_REVIEW":("CS","SR"),"DRAFT_TENDER_IA":("IA",),"TENDER_ISSUED":("IA",),"VENDOR_RESPONSE":("PROCUREMENT","TENDER","VENDOR"),"TECH_BID_BOARD":("TECHNICAL","BOARD"),"TEC_REPORT":("TEC",),"TAC_REVIEW":("TAC",),"IFD_CFA_APPROVAL":("IFD","CFA")}
+
+def can_act_on_stage(user,project):
+    if project.current_status in {"APPROVED","REJECTED","CANCELLED"}: return False
+    if has_any_role(user,"ADMIN","SUPER_ADMIN"): return True
+    required=STAGE_DESIGNATIONS.get(project.current_status,())
+    designation_tokens=set(re.findall(r"[A-Z0-9]+",(user.designation or "").upper()))
+    allowed=any(token in designation_tokens for token in required if token!="USER")
+    if not allowed:
+        for keyword in STAGE_COMMITTEES.get(project.current_status,()):
+            if project.committees.filter(committee_name__icontains=keyword,members__user=user).exists():
+                allowed=True; break
+    return allowed
+
+def can_reply_to_query(user,project,query):
+    if has_any_role(user,"ADMIN","SUPER_ADMIN"): return True
+    designation_tokens=set(re.findall(r"[A-Z0-9]+",(user.designation or "").upper()))
+    target_tokens=set(re.findall(r"[A-Z0-9]+",(query.target_designation or "").upper()))
+    internal_committee=project.committees.filter(members__user=user).exists()
+    if query.target_vendor_id:
+        return bool(internal_committee or (target_tokens and target_tokens.issubset(designation_tokens)))
+    return bool((target_tokens and target_tokens.issubset(designation_tokens)) or project.created_by_id==user.id or project.members.filter(user=user).exists() or internal_committee)
+
+def notify_project_stakeholders(project,actor,title,message):
+    recipient_ids=set(project.members.values_list("user_id",flat=True))
+    recipient_ids.update(user_id for user_id in project.committees.values_list("members__user_id",flat=True) if user_id)
+    recipient_ids.add(project.created_by_id)
+    recipient_ids.discard(actor.id)
+    Notification.objects.bulk_create([Notification(recipient_id=user_id,project=project,title=title,message=message) for user_id in recipient_ids])
+
 class ProjectViewSet(viewsets.ModelViewSet):
     http_method_names=["get","post","patch","head","options"]
     serializer_class=ProjectSerializer
@@ -23,6 +54,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
     search_fields=["project_code","title","description"]
     filterset_fields=["current_status","department"]
     ordering_fields=["created_at","updated_at","estimated_amount","title"]
+
+    @action(detail=False,methods=["get"],url_path="my-tasks")
+    def my_tasks(self,request):
+        tasks=[]
+        projects=self.get_queryset().select_related("department","created_by").prefetch_related("members__user","committees__members__user","queries__raised_by")
+        for project in projects:
+            if can_act_on_stage(request.user,project):
+                tasks.append({"id":f"stage-{project.id}","task_type":"WORKFLOW_ACTION","project_id":str(project.id),"project_code":project.project_code,"project_title":project.title,"current_status":project.current_status,"title":"Review current workflow stage","created_at":project.updated_at})
+            for query in project.queries.filter(status="OPEN").select_related("raised_by","target_vendor"):
+                if can_reply_to_query(request.user,project,query):
+                    tasks.append({"id":f"query-{query.id}","task_type":"QUERY_REPLY","project_id":str(project.id),"project_code":project.project_code,"project_title":project.title,"current_status":project.current_status,"title":query.subject,"detail":query.body,"created_at":query.created_at})
+        tasks.sort(key=lambda task:task["created_at"],reverse=True)
+        return Response(tasks)
 
     def get_queryset(self):
         qs=ProcurementProject.objects.select_related("department","created_by").prefetch_related("members__user")
@@ -64,6 +108,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         message=serializer.save(project=project,sender=request.user)
         ProjectActivity.objects.create(project=project,actor=request.user,project_message=message,activity_type="MESSAGE")
         AuditLog.objects.create(user=request.user,entity_type="project",entity_id=str(project.id),operation="MESSAGE",new_values={"message_id":str(message.id)})
+        notify_project_stakeholders(project,request.user,"Project message added",f"{request.user.name} added a message to {project.project_code}.")
         return Response(MessageSerializer(message).data,status=201)
 
     @action(detail=True,methods=["get","post"],parser_classes=[MultiPartParser,FormParser])
@@ -95,6 +140,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         document.save(update_fields=["activity","file_size","uploaded_by"])
         AuditLog.objects.create(user=request.user,entity_type="document",entity_id=str(document.id),operation=activity_type,new_values={"version":version_number,"name":document.document_name})
         recipients=set(project.members.exclude(user=request.user).values_list("user_id",flat=True))
+        recipients.update(user_id for user_id in project.committees.values_list("members__user_id",flat=True) if user_id and user_id!=request.user.id)
         if project.created_by_id!=request.user.id: recipients.add(project.created_by_id)
         for recipient_id in recipients:
             Notification.objects.create(recipient_id=recipient_id,project=project,title="Project document updated",message=f"{document.document_name} was added to {project.project_code}.")
@@ -143,15 +189,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"committee":"Assign a user representative to the TAC before accepting the tender."})
         if ProjectQuery.objects.filter(project=project,status="OPEN").exists():
             raise ValidationError({"queries":"Answer all open queries before advancing this stage."})
-        if not has_any_role(request.user,"ADMIN","SUPER_ADMIN"):
-            required={"TSC_APPROVAL":("ADMIN",),"BOARD_FORMATION":("ADMIN",),"TSC_REPORT_AS_IA":("TSC",),"AS_IA_APPROVAL":("AS","IA"),"DG_SS_APPROVAL":("DG","SS"),"HQ_REVIEW":("HQ",),"CS_SR_REVIEW":("CS","SR"),"DRAFT_TENDER_IA":("IA",),"TENDER_ISSUED":("IA",),"VENDOR_RESPONSE":("ADMIN",),"TECH_BID_BOARD":("ADMIN",),"TEC_FORMATION":("SS",),"TEC_REPORT":("TEC",),"PRICE_BID_OPEN":("ADMIN",),"TAC_REVIEW":("TAC","USER"),"IFD_CFA_APPROVAL":("IFD","CFA")}.get(project.current_status,())
-            designation_tokens=set(re.findall(r"[A-Z0-9]+",(request.user.designation or "").upper()))
-            has_designation=any(token in designation_tokens for token in required if token!="USER")
-            committee_keywords={"TSC_REPORT_AS_IA":("TSC",),"AS_IA_APPROVAL":("AS","IA"),"DG_SS_APPROVAL":("DG","SS"),"HQ_REVIEW":("HQ",),"CS_SR_REVIEW":("CS","SR"),"DRAFT_TENDER_IA":("IA",),"TENDER_ISSUED":("IA",),"VENDOR_RESPONSE":("PROCUREMENT","TENDER","VENDOR"),"TECH_BID_BOARD":("TECHNICAL","BOARD"),"TEC_REPORT":("TEC",),"TAC_REVIEW":("TAC",),"IFD_CFA_APPROVAL":("IFD","CFA")}.get(project.current_status,())
-            if committee_keywords:
-                committee_qs=project.committees.filter(members__user=request.user)
-                has_designation=has_designation or any(committee_qs.filter(committee_name__icontains=keyword).exists() for keyword in committee_keywords)
-            if not has_designation: raise PermissionDenied("Your account designation is not authorized to advance this stage.")
+        if not can_act_on_stage(request.user,project): raise PermissionDenied("Your account designation is not authorized to advance this stage.")
         previous=project.current_status
         project.current_status=next_status
         project.save(update_fields=["current_status","updated_at"])
@@ -160,6 +198,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if remarks: note=f"{note}. {remarks}"
         ProjectActivity.objects.create(project=project,actor=request.user,activity_type=activity_type,message=note)
         AuditLog.objects.create(user=request.user,entity_type="project",entity_id=str(project.id),operation=action_name,new_values={"status":next_status,"remarks":remarks})
+        notify_project_stakeholders(project,request.user,"Project stage updated",f"{project.project_code} moved to {next_status.replace('_',' ').title()}. {request.user.name} recorded: {action_name.replace('_',' ').title()}.")
         return Response({"current_status":next_status})
 
     @action(detail=True,methods=["get","post"],url_path="queries")
@@ -178,6 +217,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             query=ProjectQuery.objects.create(project=project,stage=project.current_status,subject=subject,body=body,raised_by=request.user,target_designation=(request.data.get("target_designation") or "").strip(),target_vendor=target_vendor)
             ProjectActivity.objects.create(project=project,actor=request.user,activity_type="STATUS_CHANGED",message=f"Query raised at {project.current_status.replace('_',' ')}: {subject}")
             AuditLog.objects.create(user=request.user,entity_type="project_query",entity_id=str(query.id),operation="CREATE",new_values={"project":str(project.id),"stage":query.stage,"subject":subject,"target_designation":query.target_designation,"target_vendor":str(target_vendor.id) if target_vendor else None})
+            notify_project_stakeholders(project,request.user,"Project query raised",f"{request.user.name} raised a query on {project.project_code}: {subject}.")
             return Response(self._query_data(query,request.user),status=201)
         qs=project.queries.select_related("raised_by","target_vendor").prefetch_related("replies__actor")
         return Response([self._query_data(q,request.user) for q in qs])
@@ -191,20 +231,15 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def reply_query(self,request,pk=None,query_id=None):
         project=self.get_object(); query=project.queries.filter(id=query_id).select_related("target_vendor").first()
         if not query: raise NotFound("Query not found")
-        designation_tokens=set(re.findall(r"[A-Z0-9]+",(request.user.designation or "").upper()))
-        target_tokens=set(re.findall(r"[A-Z0-9]+",(query.target_designation or "").upper()))
-        internal_committee=project.committees.filter(members__user=request.user).exists()
-        if query.target_vendor_id:
-            eligible=has_any_role(request.user,"ADMIN","SUPER_ADMIN") or internal_committee or (target_tokens and target_tokens.issubset(designation_tokens))
-        else:
-            eligible=has_any_role(request.user,"ADMIN","SUPER_ADMIN") or (target_tokens and target_tokens.issubset(designation_tokens)) or project.created_by_id==request.user.id or project.members.filter(user=request.user).exists() or internal_committee
-        if not eligible: raise PermissionDenied("This query is assigned to another stakeholder.")
+        if not can_reply_to_query(request.user,project,query): raise PermissionDenied("This query is assigned to another stakeholder.")
         body=(request.data.get("body") or "").strip()
         if not body: raise ValidationError({"body":"Reply is required."})
         reply=ProjectQueryReply.objects.create(query=query,actor=request.user,body=body)
         query.status="ANSWERED"; query.save(update_fields=["status"])
         ProjectActivity.objects.create(project=project,actor=request.user,activity_type="STATUS_CHANGED",message=f"Reply added to query: {query.subject}")
         AuditLog.objects.create(user=request.user,entity_type="project_query",entity_id=str(query.id),operation="REPLY",new_values={"reply_id":str(reply.id)})
+        if query.raised_by_id!=request.user.id:
+            Notification.objects.create(recipient=query.raised_by,project=project,title="Project query answered",message=f"{request.user.name} replied to your query on {project.project_code}: {query.subject}.")
         return Response({"id":str(reply.id),"actor":request.user.name,"body":reply.body,"created_at":reply.created_at},status=201)
 
     @action(detail=True,methods=["get","post"],permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin])

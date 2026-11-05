@@ -20,6 +20,14 @@ docker compose ps
 docker compose logs --tail=100 backend
 ```
 
+The backend runs the seed command automatically on startup. To explicitly create any missing demo accounts, reference project, committees, and sample data after the backend is healthy, run this from the repository root:
+
+```sh
+docker compose exec backend python manage.py seed_initial_data
+```
+
+This is safe to rerun: it adds missing seed records without resetting existing project progress or test data. A fresh reset is required to get the complete through-CFA reference project if an older database still has it at TEC Report. It is available in the local `DEBUG=true` setup.
+
 Open [http://localhost:5173/](http://localhost:5173/) and sign in as the seeded administrator:
 
 - Email: `admin@procurement.local`
@@ -29,7 +37,7 @@ If the backend image fails to build or the backend is unhealthy, stop here and r
 
 ## 2. Inspect the seeded scenario and prepare a fresh one
 
-After a database reset and seed, the database contains one populated reference project: **District Hospital Diagnostic Equipment Procurement**. It is in **TEC Report**, has stage accounts assigned to the project, stage committees, a verified vendor, sample PDFs, query/reply threads, and a timeline through TEC report preparation. Sign in with the accounts below and confirm the project appears in each dashboard. Use it to inspect a populated project and continue the workflow from TEC Report if desired.
+After a database reset and seed, the database contains one populated reference project: **District Hospital Diagnostic Equipment Procurement**. It is completed through **CFA Approval**, with stage accounts assigned to the project, stage committees, a verified vendor, sample PDFs, answered query/reply threads, and a timeline across the complete workflow. Sign in with the accounts below and open **Dashboard** or **Projects**; the reference project should appear for every stage account. Use it to inspect the trail, then create the second project below to practice the workflow from Draft. **My Tasks** shows work for the active project stage, so the completed reference project has no stage action waiting. **Notifications** opens on **Unread** and shows seeded assignments, workflow handoffs, document updates, and answered queries; open a notice to jump to its project, then mark it read individually or mark all read.
 
 The rest of this guide creates a second project, **Manual Procurement Scenario B**, from Draft so you can practice the whole process yourself. The second project is not preseeded; you will assign the existing stage accounts and form its committees as you reach each stage.
 
@@ -65,13 +73,9 @@ These active, verified accounts are created by `seed_initial_data` when the back
 | User representative | User Representative | `User Representative` | `user.rep.a@procurement.local` |
 | IFD/CFA | IFD CFA Approver | `IFD CFA` | `ifd.cfa.a@procurement.local` |
 
-If the stack was already running when this code was added, run the seed command once from the repository root:
+At each stage of the new scenario, sign in as its assigned account and open **My Tasks** to find the stage action or any open query assigned to that account. New assignments, stage changes, messages, documents, and queries generate unread notifications for project stakeholders. The seeded reference inbox also has enough records to check unread filtering, mark-read actions, and pagination.
 
-```sh
-docker compose exec backend python manage.py seed_initial_data
-```
-
-Then sign in as admin and confirm the accounts appear in **User Management**. The seed command creates missing accounts without resetting existing accounts or project progress. This only runs in the local DEBUG setup. Vendors remain vendor records, not login accounts.
+Sign in as admin and confirm the accounts appear in **User Management**. Vendors remain vendor records, not login accounts.
 
 For this test, use the project drawer's **Project team** section to assign each created stakeholder to the test project. This makes the project visible to each test login. Committee membership is still set up stage by stage below. You may instead add users to the project when forming each committee, but make sure the next stage's assignee can open the project before their turn.
 

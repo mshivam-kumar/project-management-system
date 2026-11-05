@@ -159,6 +159,7 @@ class Command(BaseCommand):
         from apps.audit.models import AuditLog
         from apps.committees.models import Committee, CommitteeMember
         from apps.documents.models import Document, DocumentVersion
+        from apps.notifications.models import Notification
         from apps.procurement.models import ProcurementProject, ProjectActivity, ProjectMember, ProjectQuery, ProjectQueryReply
         from apps.vendors.models import ProjectVendor, Vendor, VendorCategory, VendorCategoryMapping
 
@@ -172,7 +173,7 @@ class Command(BaseCommand):
                 "department": department,
                 "created_by": creator,
                 "estimated_amount": "18500000.00",
-                "current_status": "TEC_REPORT",
+                "current_status": "APPROVED",
             },
         )
         ProjectMember.objects.get_or_create(project=project, user=creator, defaults={"assigned_by": admin})
@@ -183,22 +184,26 @@ class Command(BaseCommand):
         trail = [
             ("PROJECT_CREATED", "Project created with scope, budget estimate, and procurement department."),
             ("DOCUMENT_UPLOADED", "Uploaded initial requirements and technical specification."),
-            ("PROJECT_SUBMITTED", "Submitted for procurement review."),
             ("FORWARDED", "Draft → TSC Approval. Requirement submitted."),
             ("COMMITTEE_FORMED", "TSC Committee formed and members assigned."),
-            ("APPROVED", "TSC approved; board formed."),
+            ("APPROVED", "TSC Approval → Board Formation. TSC approved; the board was formed."),
             ("COMMITTEE_FORMED", "TSC Board formed with assigned members."),
-            ("FORWARDED", "TSC report submitted for AS (IA) perusal."),
-            ("APPROVED", "AS (IA) reviewed and approved the TSC report."),
-            ("APPROVED", "DG/SS approval recorded."),
-            ("STATUS_CHANGED", "HQ query raised and answered; file forwarded for CS (SR) review."),
+            ("FORWARDED", "Board Formation → TSC Report · AS (IA). TSC report submitted for perusal."),
+            ("APPROVED", "TSC Report · AS (IA) → AS (IA) Approval. The report was approved."),
+            ("APPROVED", "AS (IA) Approval → DG/SS Approval. The file was forwarded for approval."),
+            ("APPROVED", "DG/SS Approval → HQ Review. Approval was recorded and the file moved to HQ."),
+            ("STATUS_CHANGED", "HQ query raised and answered."),
+            ("FORWARDED", "HQ Review → CS (SR) Review. The file was forwarded after the HQ reply."),
             ("STATUS_CHANGED", "CS (SR) query raised and answered."),
-            ("FORWARDED", "TSC report forwarded to CS (SR), then draft tender sent to IA Wing."),
-            ("APPROVED", "IA acknowledged the draft tender and issued the tender."),
+            ("FORWARDED", "CS (SR) Review → Draft Tender · IA Wing. The report and draft tender were forwarded."),
+            ("APPROVED", "Draft Tender · IA Wing → Tender Issued. IA acknowledged the tender as correct."),
             ("VENDOR_ASSOCIATED", "Verified vendor associated: Aster Clinical Systems Pvt Ltd."),
+            ("STATUS_CHANGED", "Tender Issued → Vendor Response. The response window was opened."),
             ("DOCUMENT_UPLOADED", "Vendor technical response received by the committee."),
+            ("STATUS_CHANGED", "Vendor Response → Technical Bid Board. The response window was closed."),
             ("COMMITTEE_FORMED", "Technical Bid Opening Board formed."),
-            ("COMMITTEE_FORMED", "TEC formed after SS approval; TEC report preparation started."),
+            ("STATUS_CHANGED", "Technical Bid Board → TEC Formation. SS approved the TEC formation."),
+            ("APPROVED", "TEC Formation → TEC Report. TEC report preparation started."),
         ]
         # Fill in any missing entries if a prior seed run stopped midway.
         for event_type, message in trail:
@@ -208,6 +213,21 @@ class Command(BaseCommand):
                 message=message,
                 defaults={"actor": creator},
             )
+        complete_fixture = project.current_status == "APPROVED"
+        if complete_fixture:
+            final_workflow_trail = [
+                ("FORWARDED", "TEC Report → Price Bid Open. TEC report forwarded for price bid opening."),
+                ("STATUS_CHANGED", "Price Bid Open → TAC Review. Price bid opening was recorded."),
+                ("APPROVED", "TAC Review → IFD CFA Approval. TAC accepted the tender after negotiation with the vendor; User Representative participated."),
+                ("APPROVED", "IFD CFA Approval → Approved. CFA approval was recorded through IFD."),
+            ]
+            for event_type, message in final_workflow_trail:
+                ProjectActivity.objects.get_or_create(
+                    project=project,
+                    activity_type=event_type,
+                    message=message,
+                    defaults={"actor": creator},
+                )
         document_activity = project.activities.filter(activity_type="DOCUMENT_UPLOADED").first()
 
         stage_committees = [
@@ -255,6 +275,51 @@ class Command(BaseCommand):
                 defaults={"assigned_by": admin or creator},
             )
 
+        project_members = list(ProjectMember.objects.filter(project=project).select_related("user"))
+        for membership in project_members:
+            Notification.objects.get_or_create(
+                recipient=membership.user,
+                project=project,
+                title="Reference project assigned",
+                message=f"You can review the populated workflow, committees, documents, and query history for {project.project_code}.",
+            )
+            Notification.objects.get_or_create(
+                recipient=membership.user,
+                project=project,
+                title="Reference committees formed",
+                defaults={"message": "The seeded project includes the stage committees and member assignments used in this workflow example."},
+            )
+
+        # Create inbox examples tied to each stage account's part of the
+        # seeded history. New notices stay unread until the recipient reads them.
+        workflow_notices = [
+            ("Requirement submitted to TSC", "The sample project was submitted for TSC approval."),
+            ("TSC approval and board formation", "TSC approval was recorded and the TSC Board was formed."),
+            ("TSC report sent for AS (IA) perusal", "The sample TSC report was sent to AS (IA) for perusal."),
+            ("AS (IA) approved the TSC report", "AS (IA) approval was recorded before the file moved to DG/SS."),
+            ("DG/SS approval and HQ review", "DG/SS approval was recorded and the file moved to HQ review."),
+            ("HQ review and CS (SR) handoff", "The seeded HQ query was answered before the file moved to CS (SR)."),
+            ("CS (SR) review and IA handoff", "CS (SR) review was recorded and the draft tender went to IA Wing."),
+            ("IA acknowledged and issued the tender", "IA acknowledged the draft tender before tender responses were recorded."),
+            ("Vendor response and technical bid board", "The committee recorded a vendor response and formed the Technical Bid Opening Board."),
+            ("TEC formation after SS approval", "SS approval was recorded before TEC report preparation."),
+            ("TEC report preparation", "The seeded TEC report and query trail are available in the project documents."),
+        ]
+        if complete_fixture:
+            workflow_notices.extend([
+                ("TEC report forwarded for price bid opening", "The TEC report was forwarded and price bid opening was recorded."),
+                ("TAC review and negotiation", "TAC reviewed the report, negotiated with the vendor, and recorded acceptance with the User Representative."),
+                ("CFA approval through IFD", "The file moved through IFD and CFA approval completed the seeded workflow."),
+            ])
+        for title, message in workflow_notices:
+            for membership in project_members:
+                Notification.objects.get_or_create(
+                    recipient=membership.user,
+                    project=project,
+                    title=f"Reference workflow: {title}",
+                    defaults={"message": message},
+                )
+
         category, _ = VendorCategory.objects.get_or_create(
             name="Medical Equipment",
             defaults={"description": "Diagnostic and clinical equipment suppliers"},
@@ -297,6 +362,12 @@ class Command(BaseCommand):
             ("Vendor_Technical_Response.pdf", "Vendor technical response received by the committee."),
             ("TEC_Report_Draft.pdf", "TEC report preparation started."),
         ]
+        if complete_fixture:
+            seeded_documents.extend([
+                ("Price_Bid_Opening_Record.pdf", "Price bid opening recorded after TEC report review."),
+                ("TAC_Negotiation_and_Acceptance.pdf", "TAC negotiation and acceptance recorded with the User Representative."),
+                ("IFD_CFA_Approval.pdf", "CFA approval recorded through IFD."),
+            ])
         for document_name, activity_message in [("Diagnostic_Equipment_Requirements.pdf", "Uploaded initial requirements and technical specification."), *seeded_documents]:
             activity, _ = ProjectActivity.objects.get_or_create(
                 project=project,
@@ -333,12 +404,38 @@ class Command(BaseCommand):
                     new_values={"version": version.version_number, "name": document_name},
                 )
 
+        document_notices = [
+            ("TSC committee report available", "The seeded TSC committee report is available in the project documents."),
+            ("Draft tender available for IA review", "The seeded draft tender is available in the project documents."),
+            ("Vendor technical response recorded", "The committee-recorded vendor response is available in the project documents."),
+            ("TEC report draft available", "The seeded TEC report draft is available in the project documents."),
+        ]
+        if complete_fixture:
+            document_notices.extend([
+                ("Price bid opening record available", "The seeded price bid opening record is available in the project documents."),
+                ("TAC negotiation record available", "The seeded TAC negotiation and acceptance record is available in the project documents."),
+                ("IFD/CFA approval available", "The seeded CFA approval record is available in the project documents."),
+            ])
+        for title, message in document_notices:
+            for membership in project_members:
+                Notification.objects.get_or_create(
+                    recipient=membership.user,
+                    project=project,
+                    title=f"Reference document: {title}",
+                    defaults={"message": message},
+                )
+
         seeded_queries = [
             ("HQ_REVIEW", "Confirm equipment compatibility", "Please confirm the requested interface standard.", "hq.a@procurement.local", "tsc.a@procurement.local", ""),
             ("CS_SR_REVIEW", "Confirm service coverage", "Please confirm the proposed service period.", "cs.sr.a@procurement.local", "tsc.a@procurement.local", ""),
             ("VENDOR_RESPONSE", "Clarify delivery schedule", "Please confirm the requested installation timeline.", "tender.a@procurement.local", "tender.a@procurement.local", ""),
             ("TEC_REPORT", "Clarify evaluation criterion", "Please confirm the interpretation of criterion 4.", "hq.a@procurement.local", "tec.a@procurement.local", "TEC"),
         ]
+        if complete_fixture:
+            seeded_queries.extend([
+                ("TAC_REVIEW", "Confirm negotiation record", "Please confirm the vendor negotiation outcome recorded by TAC.", "hq.a@procurement.local", "tac.a@procurement.local", "TAC"),
+                ("IFD_CFA_APPROVAL", "Confirm CFA approval documents", "Please confirm that the approval note and supporting documents are attached.", "ifd.cfa.a@procurement.local", "ifd.cfa.a@procurement.local", "IFD CFA"),
+            ])
         for stage, subject, body, raised_email, reply_email, target_designation in seeded_queries:
             raised_by = User.objects.get(email=raised_email)
             replied_by = User.objects.get(email=reply_email)
@@ -365,6 +462,13 @@ class Command(BaseCommand):
                 message=f"Query raised and answered at {stage.replace('_', ' ')}: {subject}",
                 defaults={"actor": replied_by},
             )
+            for membership in project_members:
+                Notification.objects.get_or_create(
+                    recipient=membership.user,
+                    project=project,
+                    title=f"Reference query answered: {subject}",
+                    defaults={"message": f"The seeded reply to the query on {project.project_code} is available in the project trail."},
+                )
 
         self.stdout.write(self.style.SUCCESS(f"Demo project ready: {project.project_code}"))
 

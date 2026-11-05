@@ -53,7 +53,7 @@ These demo accounts are created only when Django `DEBUG` is enabled. Use either 
 docker compose up --build -d
 ```
 
-The development seed creates one populated reference project: **District Hospital Diagnostic Equipment Procurement** in **TEC Report**, with all stage accounts assigned, stage committees, a verified vendor, documents, answered query threads, and a stage history. The seed also creates regular and stage-specific accounts. To start with exactly this one project after an earlier test run, reset the local database with `docker compose down -v` before starting the stack. Uploaded files under `media/` remain. Seed data is otherwise added if missing and does not reset project progress or overwrite local test records on backend restart. Create another project manually to run the complete workflow from Draft.
+The development seed creates one populated reference project: **District Hospital Diagnostic Equipment Procurement** completed through **CFA Approval**, with all stage accounts assigned, stage committees, a verified vendor, stage documents, answered query threads, and a full stage history. The seed also creates regular and stage-specific accounts. To start with exactly this one project after an earlier test run, reset the local database with `docker compose down -v` before starting the stack. Uploaded files under `media/` remain. Seed data is otherwise added if missing and does not reset project progress or overwrite local test records on backend restart. Create another project manually to run the complete workflow from Draft.
 
 If the containers are already running and you want to add any missing seed records, run:
 
@@ -138,7 +138,7 @@ Each stage's committee handles its own work, then responsibility passes to the n
 
 ## End-to-end test walkthrough
 
-1. Sign in as the seeded Super Admin (`admin@procurement.local` / `procurement-dev-2026`) and open the seeded in-progress project from the dashboard. All demo accounts use `procurement-demo-2026` as their password.
+1. Sign in as the seeded Super Admin (`admin@procurement.local` / `procurement-dev-2026`) and open the seeded in-progress project from the dashboard. Regular demo accounts use `procurement-demo-2026`; workflow-stage accounts use `StageWalk!4826a` (see [MANUAL_TEST_GUIDE.md](MANUAL_TEST_GUIDE.md)).
 2. Inspect its activity timeline, open **Committees** to see the committee and member assignments, and check the associated verified vendor in the project drawer.
 3. In the project drawer, click **View** beside `Diagnostic_Equipment_Requirements.pdf` to preview it in the browser. **Download** saves a copy; **New version** uploads another PDF and preserves the version history.
 4. Create a second project in **Draft** and use **Procurement workflow** to follow the [stage-by-stage workflow above](#procurement-workflow-and-committee-handoffs). Assign the seeded stage accounts to the new project and form its committees as each stage begins. Raise queries and record replies; an unanswered query blocks advancement. See [USAGE_GUIDE.md](USAGE_GUIDE.md) and [MANUAL_TEST_GUIDE.md](MANUAL_TEST_GUIDE.md) for the full walkthrough.
@@ -155,7 +155,7 @@ Use a valid PDF (up to 10 MB) when testing uploads. Compose stores uploads in `m
 - Project creation, role-scoped listing, assignment to additional users, verified vendor association, searching, filtering, sorting, and pagination.
 - Project detail drawer with chronology, messages, PDF upload/version records/protected download, and project team assignment.
 - Committee creation and multiple member assignments.
-- Private notifications and read status, plus read-only audit log endpoints and UI.
+- Role-aware **My Tasks** for current-stage actions and open query replies; private notifications for project assignments, stage changes, documents, and query replies with read/unread controls; read-only audit logs.
 - Dashboard summary metrics and role-based navigation.
 - Stage workflow for the complete procurement process, designation and committee based approvals, stage query/reply threads, committee-managed vendor correspondence, and recorded transitions in activity and audit history.
 
@@ -164,10 +164,10 @@ Use a valid PDF (up to 10 MB) when testing uploads. Compose stores uploads in `m
 - Authentication: `POST /api/v1/auth/login/`, `POST /api/v1/auth/refresh/`, `POST /api/v1/auth/logout/`, `POST /api/v1/auth/password-change/`, `GET /api/v1/auth/me/`
 - Dashboard: `GET /api/v1/dashboard/summary/`
 - Departments and users: `/api/v1/departments/`, `/api/v1/users/`, user `verify`, `reject`, `deactivate`, and `assign_role` actions
-- Procurement: `/api/v1/projects/`, project `activities`, `messages`, `documents`, `members`, and `vendors` actions
+- Procurement: `/api/v1/projects/`, project `activities`, `messages`, `documents`, `members`, `vendors`, `workflow-action`, `queries`, and `my-tasks` actions
 - Vendors: `/api/v1/vendors/`, `/api/v1/vendor-categories/`, vendor `verify`, `reject`, `suspend`, `documents`, and protected document download actions
 - Committees: `/api/v1/committees/`, committee `members` action
-- Notifications and audit: `/api/v1/notifications/`, notification `read` action, `/api/v1/audit-logs/`
+- Notifications and audit: `/api/v1/notifications/`, notification `unread-count`, `read`, and `read-all` actions, `/api/v1/audit-logs/`
 
 DRF pagination, search, filters, validation, and backend permissions are enabled. Regular users can access projects they created, have been assigned to, or are committee members on; admins can view all projects. Committee membership grants access to that project and its protected details, while unrelated users cannot access it. Only active, verified vendors from the admin-managed vendor list can be attached to projects; vendors have no accounts or system access. Historical verification and audit records are not exposed for modification.
 
