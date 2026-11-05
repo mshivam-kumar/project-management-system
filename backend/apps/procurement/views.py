@@ -139,7 +139,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if (project.current_status,action_name)==("TAC_REVIEW","ACCEPT_TENDER"):
             tac=project.committees.filter(committee_name__icontains="TAC")
             if not tac.exists(): raise ValidationError({"committee":"Form the TAC committee before accepting the tender."})
-            if not tac.filter(members__designation__iregex=r"user([ _-]+representative)?").exists():
+            if not tac.filter(models.Q(members__designation__iregex=r"user([ _-]+representative)?")|models.Q(members__user__designation__iregex=r"user([ _-]+representative)?")).exists():
                 raise ValidationError({"committee":"Assign a user representative to the TAC before accepting the tender."})
         if ProjectQuery.objects.filter(project=project,status="OPEN").exists():
             raise ValidationError({"queries":"Answer all open queries before advancing this stage."})

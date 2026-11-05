@@ -42,7 +42,7 @@ class CommitteeViewSet(viewsets.ModelViewSet):
         if not has_any_role(request.user,"ADMIN","SUPER_ADMIN") and committee.project.created_by_id!=request.user.id: raise PermissionDenied("Only project owners or admins can manage committee members.")
         try: user=User.objects.get(id=request.data.get("user"),is_active=True,verification_status="VERIFIED")
         except User.DoesNotExist: raise ValidationError({"user":"Choose an active, verified user."})
-        member,created=CommitteeMember.objects.get_or_create(committee=committee,user=user,defaults={"designation":request.data.get("designation","")})
+        member,created=CommitteeMember.objects.get_or_create(committee=committee,user=user,defaults={"designation":request.data.get("designation") or user.designation})
         if created:
             AuditLog.objects.create(user=request.user,entity_type="committee_member",entity_id=str(member.id),operation="ASSIGN")
             Notification.objects.create(recipient=user,project=committee.project,title="Committee assignment",message=f"You were added to {committee.committee_name}.")
