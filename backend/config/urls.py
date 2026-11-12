@@ -12,6 +12,21 @@ from apps.vendors.views import VendorViewSet, VendorCategoryViewSet
 from apps.audit.views import AuditLogViewSet
 from apps.notifications.views import NotificationViewSet
 from apps.accounts.views import LogoutView, PasswordChangeView
+from apps.workflow.views import (
+    ApprovalPolicyLevelViewSet,
+    ApprovalPolicyViewSet,
+    CommitteeViewSet,
+    NegotiationMessageViewSet,
+    ProjectStageViewSet,
+    StageSubmissionViewSet,
+    TACVendorShortlistViewSet,
+    TACWorkDocumentViewSet,
+    TenderViewSet,
+    TECWorkDocumentViewSet,
+    TSCWorkDocumentViewSet,
+    VendorBidViewSet,
+    WorkflowDashboardView,
+)
 
 router = DefaultRouter()
 router.register("users", UserViewSet)
@@ -21,6 +36,18 @@ router.register("vendors", VendorViewSet)
 router.register("vendor-categories", VendorCategoryViewSet, basename="vendor-category")
 router.register("audit-logs", AuditLogViewSet, basename="audit-log")
 router.register("notifications", NotificationViewSet, basename="notification")
+router.register("workflow/stages", ProjectStageViewSet, basename="workflow-stage")
+router.register("workflow/committees", CommitteeViewSet, basename="workflow-committee")
+router.register("workflow/submissions", StageSubmissionViewSet, basename="workflow-submission")
+router.register("workflow/approval-policies", ApprovalPolicyViewSet, basename="approval-policy")
+router.register("workflow/approval-policy-levels", ApprovalPolicyLevelViewSet, basename="approval-policy-level")
+router.register("workflow/tenders", TenderViewSet, basename="workflow-tender")
+router.register("workflow/tsc-documents", TSCWorkDocumentViewSet, basename="workflow-tsc-document")
+router.register("workflow/tec-documents", TECWorkDocumentViewSet, basename="workflow-tec-document")
+router.register("workflow/bids", VendorBidViewSet, basename="workflow-bid")
+router.register("workflow/tac-shortlist", TACVendorShortlistViewSet, basename="workflow-tac-shortlist")
+router.register("workflow/tac-documents", TACWorkDocumentViewSet, basename="workflow-tac-document")
+router.register("workflow/negotiations", NegotiationMessageViewSet, basename="workflow-negotiation")
 def home(request):
     frontend = os.getenv("FRONTEND_URL", "http://localhost:5173/")
     page = format_html(
@@ -29,4 +56,4 @@ def home(request):
     )
     return HttpResponse(page)
 
-urlpatterns = [path("", home, name="home"), path("admin/", admin.site.urls), path("api/v1/auth/login/", TokenObtainPairView.as_view()), path("api/v1/auth/refresh/", TokenRefreshView.as_view()), path("api/v1/auth/register/", RegisterView.as_view()), path("api/v1/auth/me/", MeView.as_view()), path("api/v1/auth/logout/", LogoutView.as_view()), path("api/v1/auth/password-change/", PasswordChangeView.as_view()), path("api/v1/dashboard/summary/", DashboardSummaryView.as_view()), path("api/v1/", include(router.urls))]
+urlpatterns = [path("", home, name="home"), path("admin/", admin.site.urls), path("api/v1/auth/login/", TokenObtainPairView.as_view()), path("api/v1/auth/refresh/", TokenRefreshView.as_view()), path("api/v1/auth/register/", RegisterView.as_view()), path("api/v1/auth/me/", MeView.as_view()), path("api/v1/auth/logout/", LogoutView.as_view()), path("api/v1/auth/password-change/", PasswordChangeView.as_view()), path("api/v1/dashboard/summary/", DashboardSummaryView.as_view()), path("api/v1/workflow/dashboard/", WorkflowDashboardView.as_view()), path("api/v1/", include(router.urls))]

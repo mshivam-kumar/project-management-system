@@ -1,3 +1,6 @@
+import re
+from difflib import SequenceMatcher
+
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.http import FileResponse
@@ -11,7 +14,47 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.audit.models import AuditLog
 from .models import Vendor,VendorVerification,VendorCategory,VendorDocument
-from .serializers import VendorSerializer,VendorCategorySerializer
+from .serializers import VendorMatchSerializer,VendorSerializer,VendorCategorySerializer
+
+
+_MATCH_STOP_WORDS = {
+    "a", "an", "and", "for", "in", "of", "or", "the", "to", "want",
+    "need", "buy", "purchase", "require", "requirements", "product",
+    "products", "service", "services",
+}
+
+
+def _search_tokens(value):
+    return {
+        token for token in re.findall(r"[a-z0-9]+", value.casefold())
+        if len(token) > 1 and token not in _MATCH_STOP_WORDS
+    }
+
+
+def _vendor_match(vendor, query_tokens):
+    searchable_text = " ".join([
+        vendor.vendor_name,
+        vendor.products_services,
+        " ".join(
+            f"{category.name} {category.description}"
+            for category in vendor.categories.all()
+        ),
+    ])
+    vendor_tokens = _search_tokens(searchable_text)
+    matched_terms = []
+    for query_token in sorted(query_tokens):
+        best_match = max(
+            (
+                SequenceMatcher(None, query_token, token).ratio()
+                for token in vendor_tokens
+            ),
+            default=0,
+        )
+        if best_match >= 0.78:
+            matched_terms.append(query_token)
+    if not matched_terms:
+        return None
+    return round(len(matched_terms) * 100 / len(query_tokens), 1), matched_terms
 
 class VendorViewSet(viewsets.ModelViewSet):
     queryset=Vendor.objects.all().prefetch_related("categories")
@@ -19,6 +62,34 @@ class VendorViewSet(viewsets.ModelViewSet):
     permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin]
     search_fields=["vendor_name","registration_number","gstin","email"]
     filterset_fields=["verification_status","is_active","categories"]
+    @action(detail=False,methods=["post"],url_path="match")
+    def match(self,request):
+        serializer=VendorMatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        query_tokens=_search_tokens(serializer.validated_data["query"])
+        if not query_tokens:
+            raise ValidationError({"query":"Enter at least one searchable product or service term."})
+        results=[]
+        vendors=Vendor.objects.filter(
+            is_active=True,
+            verification_status=Vendor.Status.VERIFIED,
+        ).prefetch_related("categories")
+        for vendor in vendors:
+            match=_vendor_match(vendor,query_tokens)
+            if match:
+                score,matched_terms=match
+                results.append({
+                    "id":str(vendor.id),
+                    "vendor_name":vendor.vendor_name,
+                    "email":vendor.email,
+                    "phone":vendor.phone,
+                    "products_services":vendor.products_services,
+                    "category_names":sorted(category.name for category in vendor.categories.all()),
+                    "similarity_score":score,
+                    "matched_terms":matched_terms,
+                })
+        results.sort(key=lambda result:(-result["similarity_score"],result["vendor_name"].casefold()))
+        return Response(results[:50])
     def perform_create(self,serializer):
         vendor=serializer.save()
         AuditLog.objects.create(user=self.request.user,entity_type="vendor",entity_id=str(vendor.id),operation="CREATE",new_values={"vendor_name":vendor.vendor_name})

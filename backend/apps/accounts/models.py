@@ -14,7 +14,7 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     class Verification(models.TextChoices): PENDING="PENDING"; VERIFIED="VERIFIED"; REJECTED="REJECTED"
     id=models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name=models.CharField(max_length=160); email=models.EmailField(unique=True)
+    name=models.CharField(max_length=160); employee_id=models.CharField(max_length=32,null=True,blank=True,unique=True); email=models.EmailField(unique=True)
     department=models.ForeignKey("departments.Department",null=True,blank=True,on_delete=models.SET_NULL,related_name="users")
     designation=models.CharField(max_length=160,blank=True)
     is_active=models.BooleanField(default=False); is_staff=models.BooleanField(default=False)

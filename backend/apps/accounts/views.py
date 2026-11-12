@@ -35,7 +35,7 @@ class PasswordChangeView(APIView):
 
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class=UserSerializer
-    queryset=User.objects.select_related("department").prefetch_related("roles")
+    queryset=User.objects.select_related("department").prefetch_related("roles").order_by("name", "id")
     permission_classes=[IsAuthenticated,IsAdminOrSuperAdmin]
     search_fields=["name","email"]; filterset_fields=["department","verification_status","is_active","roles__name"]
     def get_permissions(self): return [permission() for permission in self.permission_classes]

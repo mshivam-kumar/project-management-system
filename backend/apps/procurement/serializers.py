@@ -16,3 +16,14 @@ class MessageSerializer(serializers.ModelSerializer):
 class ProjectMemberSerializer(serializers.ModelSerializer):
     user_name=serializers.CharField(source="user.name",read_only=True); user_email=serializers.EmailField(source="user.email",read_only=True)
     class Meta: model=ProjectMember; fields=["id","project","user","user_name","user_email","assigned_by","assigned_at"]; read_only_fields=["id","project","assigned_by","assigned_at"]
+
+class ProjectVendorSelectionSerializer(serializers.Serializer):
+    vendor_ids=serializers.ListField(child=serializers.UUIDField(),allow_empty=False)
+
+    def validate_vendor_ids(self,vendor_ids):
+        if len(vendor_ids)!=len(set(vendor_ids)):
+            raise serializers.ValidationError("A vendor can only be selected once.")
+        return vendor_ids
+
+class ProjectVendorRemovalSerializer(serializers.Serializer):
+    vendor_id=serializers.UUIDField()

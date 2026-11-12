@@ -3,7 +3,7 @@ from .models import User, Role, UserRole, UserVerification
 class UserSerializer(serializers.ModelSerializer):
     roles=serializers.SlugRelatedField(many=True,read_only=True,slug_field="name")
     department_name=serializers.CharField(source="department.department_name",read_only=True)
-    class Meta: model=User; fields=["id","name","email","department","department_name","designation","is_active","verification_status","roles","created_at"]; read_only_fields=["id","is_active","verification_status","created_at"]
+    class Meta: model=User; fields=["id","name","employee_id","email","department","department_name","designation","is_active","verification_status","roles","created_at"]; read_only_fields=["id","is_active","verification_status","created_at"]
 class RegisterSerializer(serializers.ModelSerializer):
     password=serializers.CharField(write_only=True,min_length=10)
     class Meta: model=User; fields=["name","email","password","department","designation"]
@@ -19,10 +19,15 @@ class VerifiedTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class ManagedUserCreateSerializer(serializers.ModelSerializer):
     password=serializers.CharField(write_only=True,min_length=10)
-    role=serializers.ChoiceField(choices=[("USER","USER"),("ADMIN","ADMIN")],default="USER")
+    role=serializers.ChoiceField(choices=[("USER","USER"),("ADMIN","ADMIN"),("SS","SS"),("AS","AS"),("DGS","DGS"),("IA_WING","IA WING")],default="USER")
     class Meta:
         model=User
-        fields=["name","email","password","department","designation","role"]
+        fields=["name","employee_id","email","password","department","designation","role"]
+    def validate_employee_id(self,value):
+        value=value.strip() if value else None
+        if value and User.objects.filter(employee_id=value).exists():
+            raise serializers.ValidationError("An employee with this ID already exists.")
+        return value
     def create(self,data):
         role_name=data.pop("role")
         password=data.pop("password")
